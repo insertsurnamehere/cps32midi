@@ -1,4 +1,5 @@
 # cps32midi
+MADE IN COLLABORATION WITH VGMRIPS.NET https://vgmrips.net/forum/viewforum.php?f=15
 Cps32midi is a sequence converter for the games that where first (or only) released on capcom's last (and shortlived) arcade system:
 Capcom Play System 3 (cps3 for short).
 It included a wide selection of 6 games (impressive), of which:
@@ -9,9 +10,11 @@ It included a wide selection of 6 games (impressive), of which:
          and a sin to humanity >>>>>>>>>>>>>>:(    );
 and 1 single, lonely, game, that game begin red heart/warzard, that nobody knows about, that gets relatively no love, an interesting that was the first game for the cps3game that died, because it was only released here, and rests in the grave of it <<<<<<<:(
 
-but enough chit chat, this converter needs works with the sample data, instrument data, and the sequence data, separated in 3 bin files, that can be ripped with mame's debugger commands
+but enough chit chat, this converter needs works with the sample data, instrument data, and the sequence data, separated in 3 bin files, that can be ripped with mame's debugger commands:
+
 https://docs.mamedev.org/debugger/memory.html#debugger-command-save
-the placement of these are different for each game, and migth be dependent on the configuration of the simms (basicly, in the board itself, there are 7 slots where a memory expansion chip can be placed, for this boards there are 3 types of chips (these are the simms) that can be placed in these slots, and each game REQUIRES a specific arrangement of these types of chips, and maybe that can shifth the actual addresses of the sample, instrument, and sequence data)
+
+The placement of these are different for each game, and migth be dependent on the configuration of the simms (basicly, in the board itself, there are 7 slots where a memory expansion chip can be placed, for this boards there are 3 types of chips (these are the simms) that can be placed in these slots, and each game REQUIRES a specific arrangement of these types of chips, and maybe that can shifth the actual addresses of the sample, instrument, and sequence data)
 One advice for using this program: DONT
 unless you hav some expirience with the mame debugger, i don't know of a reliable way to find it, but there is a sound test, that cloud be useful, and these have a "consistent" byte size, but if you value your insanity: DONT.
 
@@ -40,6 +43,9 @@ BF is the volume, 3C = note, and 81 40 is the duration, if the 3rd byte (81) was
 
 if the command is greater or equal to C0, then it is an effect, inside the code i mane comments on what those effects are...
 i neeed more comments...
-it's a work in progress, i need to finish the vibrato code, also i don't like the mixing
+it's a work in progress, i need to finish the vibrato code, also i don't like the mixing (either the volume command, or the sustain is at fault here).
+
+i know my descriptions suck
+deal  with it >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>:(
 
 JOJO MIDIS
