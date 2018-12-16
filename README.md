@@ -23,12 +23,13 @@ Here is the structure of the samplebank, instrumentbank and the sequence data.
 
 Samplebank:
 its simpler than the other two, should be the easiest to find, its comptised of a series of 4 word-long values,
-the first word is the sample start pointer, the second is the loop start pointer, the third is the end sample pointer, and the last is the center key, these pointers are 
+the first word is the sample start pointer, the second is the loop start pointer, the third is the end sample pointer, and the last is the center key.
 EXAMPLE: 0000122A 00003CB2 00003CB2 00000050
 the pointers are applied to the huge sample table, that can be found in the simm3.* files inside the rom of a cps3 game, though these need to be interleaved in couples (simm3.0 interleaved with simm3.1, simm3.2 with simm3.3, and so on), then combined.
 
 Instrumentbank:
-more complex, the first 16 word sized pointers point to the offsets of each instruments, then adding the pointers and the instrument offsets and you get the locaton of each instrument.
+its similar to soundfonts in concept, but a lot less complicated in the file structure, without any of that complicated chunk stuff,
+the first 16 word sized pointers point to the offsets of each instruments, then adding the pointers and the instrument offsets and you get the locaton of each instrument.
 the actual data is similar to the cps2, its composed of 12 bytes, for each keysplit
 EXAMPLE: 29 FF 10 50 00 56 00 3F 3F 7F 01 3F ...
 29(1st byte) is the highest key for the keysplit, 56(6th byte) is the sample id (you need to count the samples starting with 0 to know the sample used), 3F 3F 7F 01 3F (last 5 bytes) are the attack/delay/hold/sustain/release envelopes, and these work similarly to how the cps2 handled adsr (i took inspiration from vgmtans's qsound converter (i meant "stole") also the cps3 updates the sound code at a different speed than the cps2), FF(2nd byte) migth be the volume... i don't really know the rest...
