@@ -46,7 +46,7 @@ if the command is greater or equal to C0, then it is an effect, inside the code 
 i neeed more comments...
 it's a work in progress, i need to finish the vibrato code, also i don't like the mixing (either the volume command, or the sustain is at fault here).
 
-i know my descriptions suck
+i know my descriptions suck, 
 deal  with it >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>:(
 
 JOJO MIDIS
