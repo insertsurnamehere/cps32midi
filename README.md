@@ -9,7 +9,7 @@ It included a wide selection of 6 games (impressive), of which:
          jba: herritage for the future (which everyboy and their grandma plays)
          and jojo's venure (which nobody plays, except for the grandmas that don't know there are 2 versions of this game, because it sucks, 
          and a sin to humanity >>>>>>>>>>>>>>:(    );
-and 1 single, lonely, game, that game begin red heart/warzard, that nobody knows about, that gets relatively no love, an interesting that was the first game for the cps3game that died, because it was only released here, and rests in the grave of it <<<<<<<:(
+and 1 single, lonely, game, that game begin red heart/warzard, that nobody knows about, that gets relatively no love, an interesting figthing game with rpg elements, that was the first title ever released for the cps3, that died, because it was only released there (there where no ports for this game to my knowledge), and rests in the grave of it <<<<<<<:(
 
 but enough chit chat, this converter needs works with the sample data, instrument data, and the sequence data, separated in 3 bin files, that can be ripped with mame's debugger commands:
 
