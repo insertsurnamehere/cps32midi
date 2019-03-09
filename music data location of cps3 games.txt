@@ -1,0 +1,6 @@
+sfiii2
+	songs: 0x06D537bc
+jojo
+	instruments:0x06757ff8
+	samples:0x0675c000
+	songs:0x06760000
