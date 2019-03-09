@@ -63,7 +63,10 @@ and after that its the note duraton, acts like the delay command, but it can onl
 EXAMPLE: BF 3C 81 40
 BF is the volume, 3C = note, and 81 40 is the duration, if the 3rd byte (81) was less than 80,  then it would become a single byte.
 
-if the command is greater or equal to C0, then it is an effect, inside the code i mane comments on what those effects are...
+if the command is greater or equal to C0, then it is an effect, inside the code i made comments on what those effects are...
+the tables (for vibrato value, adsr, etc) are the same as in the cps2, but i think these are processed differently, obviusly.
+
+
 i neeed more comments...
 it's a work in progress, i need to finish the vibrato code, also i don't like the mixing (either the volume command, or the sustain is at fault here).
 
