@@ -1094,6 +1094,12 @@ const void process_lfo(INT32 *vib_depth, INT32 *lfo_rate, INT8 *lfo_state, INT32
         }
     }
 }
+const void reset_lfo(INT32 *vib_depth, INT32 *lfo_rate, INT8 *lfo_state, INT32 *lfo_limit, INT32 *cur_lfo_val, INT32 *lfo_increment){
+    vib_depth = 0;
+    lfo_state = 1;
+    cur_lfo_val = 0;
+    lfo_increment = 0;
+}
 const void portamento_fix(float semitone, UINT8 new_rpn){
     INT16 portamento = semitone * 8192 / new_rpn;
     return;
@@ -1155,7 +1161,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 44 && mid_state.midChn == 10){
+            if (sequence == 29 && mid_state.midChn == 9){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -1229,6 +1235,10 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             }
                             case 0xc3:{ //NOTE BEND
                                 //printf("0xc3 in pos %x", mid_state.curDwly);
+                                //the bend range is theoretically of 12 semitones, divided into 6144 values (cents), but the midi format uses 8192
+                                //6144 / 12 = 512, 8192 / 12 = 682,7 (roughly)
+                                //8192 / 512 = 16, so to get 512 cents, you have 16 semitones
+                                //portamento works best with 12 semitones, but vibrato works with 16 (maybe)
                                 if (rpn != 12){
                                     rpn = 12;
                                     WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 00);
@@ -1238,12 +1248,11 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 0x7f);
                                 }
                                 //this is so stupid
+                                if (vib_on){
+                                    printf("\n  oh no");
+                                }
                                 UINT8 note_bend = data[pos + 1];
                                 note_bend += 0x80;
-                                INT16 note_bend_16 = note_bend << 7;
-                                float bendy_straw = note_bend_16;
-                                bendy_straw = bendy_straw * 12 / 8192;
-                                portamento_fix(bendy_straw, 16);
                                 WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
                                 pos += 2;
                                 break;
@@ -1265,14 +1274,12 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 if (vib_on == 1){
                                     lfo_increment = vib_depth * lfo_rate;
                                     vib_depth <<= 16;
-                                    if (rpn != 16){
-                                        rpn = 16;
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 00);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 00);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 6, 16);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 0x7f);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 0x7f);
-                                    }
+                                    printf("\n 0xc5 found in song %x, position 0x%x", sequence, pos);
+                                }
+                                else if(play_mode == 1){
+                                    reset_lfo(&vib_depth, &lfo_rate, &lfo_state, &lfo_limit, &cur_lfo_val, &lfo_increment);
+                                    WriteEvent(&midi_inf, &mid_state, 0xe0, 0x00, 0x40);
+                                    printf("\n lfo disable found in song %x, position 0x%x", sequence, pos);
                                 }
                                 pos += 2;
                                 break;
@@ -1303,7 +1310,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 pos += 1;
                                 break;
                             }
-                            case 0xd4:case 0xd5:case 0xd6:case 0xd7:{ //REPEAT FROM REPEAT OF THE SAME TYPE ( ͡q ͜ʖ ͡°)
+                            case 0xd4:case 0xd5:case 0xd6:case 0xd7:{ //REPEAT FROM REPEAT OF THE SAME TYPE ( ͡q͜ʖ͡q)
                                 //printf("repeat in pos %x\tin the midi file, loop point now is %x\t", pos, midi_inf.pos);
                                 type = data[pos] - 0xd4; //d4 has type 0, d5 has type 1, d6 has type 2, and d7 has type 3
                                 if(cps3_repeat[type].times == 0){
@@ -1400,7 +1407,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     }
                                     INT8 sample_key = key_split[instr_number][note].sample_key + 26;
                                     INT8 vibrato_sensivity = key_split[instr_number][note].vib_sensitivity;
-                                    key_fraction = (note - sample_key ) + 7;
+                                    key_fraction = (note - sample_key) + 7;
                                     key_fraction = (key_fraction << 8) + 0x80 + vibrato_sensivity;
                                     vibrato_value = (cur_lfo_val >> 16) + key_fraction;
                                     UINT16 table_index = 0xc00;
@@ -1409,11 +1416,10 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     vibrato_value += parameter_long;
                                     INT8 counter = 0;
                                     if (vibrato_value >= table_index){
-                                        sub: vibrato_value -= table_index;
-                                        counter ++;
-                                        if (vibrato_value >= table_index){
-                                            goto sub;
-                                        }
+                                        while (vibrato_value >= table_index){
+                                            vibrato_value -= table_index;
+                                            counter ++;
+                                         }
                                     }
                                     else {
                                         if(vibrato_value >= 0.1){
@@ -1422,22 +1428,23 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                         }
                                         else {
                                             //add 1 time
-                                            add: vibrato_value += table_index;
-                                            counter --;
-                                            //then compare
-                                            if(vibrato_value >= 0.1){
-                                                //stop
+                                            do{
+                                                vibrato_value += table_index;
+                                                counter --;
+                                                //then compare
+                                                if(vibrato_value >= 0.1){
+                                                    break;
+                                                }
                                             }
-                                            else{
-                                                //loop
-                                                goto add;
-                                            }
+                                            while (vibrato_value < 0.1);
                                         }
                                     }
-                                    float note_bend = vibrato_value / 256.0;
-                                    int pitchbend_value = note_bend * 8192 / 16;
-                                    pitchbend_value += 0x2000;
-                                    WriteEvent(&midi_inf, &mid_state, 0xe0, (pitchbend_value >> 0) & 0x7f, (pitchbend_value >> 7) & 0x7f);
+                                    vibrato_value <<= 1;
+                                    vibrato_value += 0x1839;
+                                    UINT32 value = frequency_table[vibrato_value];
+                                    UINT8 val1 = (vibrato_value >> 0) & 0x7f;
+                                    UINT8 val2 = (vibrato_value >> 7) & 0x7f;
+                                    WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
                                     parameter = 0x40;
                                 }
                             }
