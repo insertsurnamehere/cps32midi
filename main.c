@@ -1104,6 +1104,8 @@ const void portamento_fix(float semitone, UINT8 new_rpn){
     INT16 portamento = semitone * 8192 / new_rpn;
     return;
 }
+
+
 const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
     float msec_tick = 0;
     UINT8 vib_tick_count = 0;
@@ -1161,7 +1163,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 29 && mid_state.midChn == 9){
+            if (sequence == 34 && mid_state.midChn == 10){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -1176,6 +1178,8 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             UINT8 song_end = 0;
             UINT8 octave = 0;
             UINT8 rpn = 0;
+            UINT8 portamento = 0;
+            UINT16 note_bend_long = 0x2000;
             for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
                 UINT8 master_loop = 0;
                 //printf("pos %x\t", pos);
@@ -1248,12 +1252,11 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 0x7f);
                                 }
                                 //this is so stupid
-                                if (vib_on){
-                                    printf("\n  oh no");
-                                }
                                 UINT8 note_bend = data[pos + 1];
                                 note_bend += 0x80;
+
                                 WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
+                                note_bend_long = note_bend << 6;
                                 pos += 2;
                                 break;
                             }
@@ -1274,12 +1277,10 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 if (vib_on == 1){
                                     lfo_increment = vib_depth * lfo_rate;
                                     vib_depth <<= 16;
-                                    printf("\n 0xc5 found in song %x, position 0x%x", sequence, pos);
                                 }
                                 else if(play_mode == 1){
                                     reset_lfo(&vib_depth, &lfo_rate, &lfo_state, &lfo_limit, &cur_lfo_val, &lfo_increment);
                                     WriteEvent(&midi_inf, &mid_state, 0xe0, 0x00, 0x40);
-                                    printf("\n lfo disable found in song %x, position 0x%x", sequence, pos);
                                 }
                                 pos += 2;
                                 break;
@@ -1441,7 +1442,17 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     }
                                     vibrato_value <<= 1;
                                     vibrato_value += 0x1839;
-                                    UINT32 value = frequency_table[vibrato_value];
+                                    double duck = (note_bend_long - 0x2000);
+                                    duck *= 12;
+                                    duck /= 0x2000;
+                                    double weed = (vibrato_value - 0x2000);
+                                    weed *= rpn;
+                                    weed /= 0x2000;
+                                    double duckweed = duck + weed;
+                                    duckweed *= 0x2000;
+                                    duckweed /= rpn;
+                                    duckweed += 0x2000;
+                                    UINT16 actual_vibrato_value = duckweed;
                                     UINT8 val1 = (vibrato_value >> 0) & 0x7f;
                                     UINT8 val2 = (vibrato_value >> 7) & 0x7f;
                                     WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
