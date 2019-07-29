@@ -101,3 +101,8 @@ ex:("sfiii3-simm3.0", "sfiii3-simm3.1", "sfiii3-simm3.2", and "sfiii3-simm3.3", 
 
 
 on instrument chunk (or any chunk), don't start a file ripping from a blank space, start from the first pointer (or first entry, in the sample chunk)
+
+don't rip samplechunk with blank samples, but exacly until the last sample (before the blank space)
+
+
+and files should be left intact
