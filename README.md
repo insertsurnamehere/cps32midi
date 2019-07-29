@@ -74,3 +74,24 @@ i know my descriptions suck,
 deal  with it >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>:(
 
 JOJO MIDIS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+IMPORTANT NOTE
+
+didn't write about this before, you need to make sure the simm3 files are formatted correcly.
+
+first, delete any simm3 file without samples, that have noise instead(open each one on audacity (file->import->audio))
+then, delete any prefix (like the acronym for the game(like sfiii3-simm3.x) in a mame rom), and renaming them so the files have exactly the  name "simm3.x"
