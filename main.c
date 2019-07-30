@@ -949,7 +949,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
                 }
                 else{
                     switch (data[pos]){
-                        case 0xc2:case 0xc3:case 0xc4:case 0xc5:case 0xc6:case 0xc7:case 0xc8:case 0xe0:case 0xe1:{
+                        case 0xc2:case 0xc3:case 0xc4:case 0xc5:case 0xc6:case 0xc7:case 0xc8:case 0xe0:case 0xe1:case 0xe6:{
                             switch (data[pos]){
                                 case 0xc5:{
                                     if (data[pos + 1] > 0){
@@ -1022,6 +1022,11 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
                             }
                         break;
                         }
+                        default:{
+                            printf("unhandeled command at position %x, the command is %x", pos, data[pos]);
+                            exit(EXIT_FAILURE);
+                            break;
+                        }
                     }
                 }
                 tot_delay += delay;
@@ -1030,6 +1035,9 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
             chn_tot_size[temp_chn_count] = tot_delay;
             tot_delay = 0;
             temp_chn_count ++;
+            if (temp_chn_count == 9){
+                UINT8 check2 = 1;
+            }
             pos = song_table_pos;
             max_chn = temp_chn_count;
         }
@@ -1152,6 +1160,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
     INT32 vibrato_value;
     UINT8 check = 0;
     INT8 pitch = 0;
+    UINT32 bend_tick = 0;
     UINT32 seq_offset = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
     for (pos = seq_offset + 1; pos < seq_offset + 33 ; pos += 2){
         UINT16 chn_offset = ((data[pos] << 8) | data[pos + 1]);
@@ -1163,7 +1172,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 34 && mid_state.midChn == 10){
+            if (sequence == 7){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -1255,7 +1264,10 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 UINT8 note_bend = data[pos + 1];
                                 note_bend += 0x80;
 
-                                WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
+                                if (!vib_on) WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
+                                else{
+                                    bend_tick = tot_tick;
+                                }
                                 note_bend_long = note_bend << 6;
                                 pos += 2;
                                 break;
@@ -1369,6 +1381,11 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 pos += 2;
                                 break;
                             }
+                            case 0xe6:{ //UNSPECIFIED
+                                //printf("0xe7 in pos %x", pos);
+                                pos += 2;
+                                break;
+                            }
                             case 0xe7:{ //UNSPECIFIED
                                 //printf("0xe7 in pos %x", pos);
                                 pos += 3;
@@ -1452,7 +1469,9 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     duckweed *= 0x2000;
                                     duckweed /= rpn;
                                     duckweed += 0x2000;
-                                    UINT16 actual_vibrato_value = duckweed;
+                                    UINT16 actual_vibrato_value;
+                                    if (tot_tick == bend_tick) actual_vibrato_value = duckweed;
+                                    else actual_vibrato_value = vibrato_value;
                                     UINT8 val1 = (vibrato_value >> 0) & 0x7f;
                                     UINT8 val2 = (vibrato_value >> 7) & 0x7f;
                                     WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
@@ -1521,6 +1540,9 @@ const void make_music_data(){
         printf("\tconverting sequence %d (pos %x)...", song_id, song_offset);
         UINT8 master_channel = 0;
         //first, pre process song
+        if (song_id ==  7){
+            UINT8 check = 1;
+        }
         analyze_song(data, pos, master_channel);
         //then, make the midi
         make_song(data, pos, master_channel, song_id);
