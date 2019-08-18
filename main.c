@@ -949,7 +949,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
                 }
                 else{
                     switch (data[pos]){
-                        case 0xc2:case 0xc3:case 0xc4:case 0xc5:case 0xc6:case 0xc7:case 0xc8:case 0xe0:case 0xe1:case 0xe6:{
+                        case 0xc2:case 0xc3:case 0xc4:case 0xc5:case 0xc6:case 0xc7:case 0xc8:case 0xc9:case 0xe0:case 0xe1:case 0xe2:case 0xe6:case 0xe7:{
                             switch (data[pos]){
                                 case 0xc5:{
                                     if (data[pos + 1] > 0){
@@ -963,6 +963,14 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
                                 case 0xe1:{
                                     UINT16 freq = data[pos + 1];
                                     freq = lfo_rate_table[freq];
+                                }
+                                case 0xc9:{
+                                    UINT8 what;
+                                    what = 1;
+                                }
+                                case 0xe6:{
+                                    UINT8 wtf;
+                                    wtf = 1;
                                 }
                             }
                             pos += 2;
@@ -978,7 +986,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
                             pos += 3;
                             break;
                         }
-                        case 0xc1:case 0xe7:case 0xe8:{
+                        case 0xc1:case 0xe8:{
                             pos += 3;
                             break;
                         }
@@ -1161,6 +1169,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
     UINT8 check = 0;
     INT8 pitch = 0;
     UINT32 bend_tick = 0;
+    UINT8 bend_on = 0;
     UINT32 seq_offset = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
     for (pos = seq_offset + 1; pos < seq_offset + 33 ; pos += 2){
         UINT16 chn_offset = ((data[pos] << 8) | data[pos + 1]);
@@ -1172,7 +1181,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 7){
+            if (sequence == 0x28 && mid_state.midChn == 11){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -1262,11 +1271,14 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 }
                                 //this is so stupid
                                 UINT8 note_bend = data[pos + 1];
+                                bend_on = (note_bend > 0)? 1: 0;
                                 note_bend += 0x80;
 
                                 if (!vib_on) WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
                                 else{
+                                    WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
                                     bend_tick = tot_tick;
+                                    printf("pos = %x", pos);
                                 }
                                 note_bend_long = note_bend << 6;
                                 pos += 2;
@@ -1303,6 +1315,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 pos += 2;
                                 break;
                             }
+
                             case 0xc7:{ //PANNING
                                 //printf("0xc7 in pos %x", pos);
                                 WriteEvent(&midi_inf, &mid_state, 0xb0, 10, data[pos + 1] & 0x7f);
@@ -1312,6 +1325,10 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             case 0xc8:{ //CHANNEL VOLUME 2
                                 //printf("0xc8 in pos %x", pos);
                                 WriteEvent(&midi_inf, &mid_state, 0xb0, 11, data[pos + 1] & 0x7f);
+                                pos += 2;
+                                break;
+                            }
+                            case 0xc9:{ //CHANNEL VOLUME 2
                                 pos += 2;
                                 break;
                             }
@@ -1381,6 +1398,10 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 pos += 2;
                                 break;
                             }
+                            case 0xe2:{ //LFO RATE
+                                pos += 2;
+                                break;
+                            }
                             case 0xe6:{ //UNSPECIFIED
                                 //printf("0xe7 in pos %x", pos);
                                 pos += 2;
@@ -1388,7 +1409,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             }
                             case 0xe7:{ //UNSPECIFIED
                                 //printf("0xe7 in pos %x", pos);
-                                pos += 3;
+                                pos += 2;
                                 break;
                             }
                             case 0xe8:{//MESSAGE TO CPU (OR GPU) (MAINLY USED TO MAKE VISUAL EFFECTS IN ATTRACT INTRO)
@@ -1411,7 +1432,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             if (note_lenght == 0){
                                 WriteEvent(&midi_inf, &mid_state ,0x80, note, velocity);
                             }
-                            if (cur_lfo_tick <= tot_tick && vib_on){
+                            if (cur_lfo_tick <= tot_tick && vib_on && bend_on == 0){
                                 // vibrato code
                                 process_lfo(&vib_depth, &lfo_rate, &lfo_state, &lfo_limit, &cur_lfo_val, &lfo_increment);
                                 if (note){
@@ -1437,6 +1458,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                         while (vibrato_value >= table_index){
                                             vibrato_value -= table_index;
                                             counter ++;
+
                                          }
                                     }
                                     else {
@@ -1474,7 +1496,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     else actual_vibrato_value = vibrato_value;
                                     UINT8 val1 = (vibrato_value >> 0) & 0x7f;
                                     UINT8 val2 = (vibrato_value >> 7) & 0x7f;
-                                    WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
+                                    //WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
                                     parameter = 0x40;
                                 }
                             }
