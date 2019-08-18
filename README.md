@@ -89,7 +89,7 @@ JOJO MIDIS
 
 
 
-IMPORTANT NOTE
+IMPORTANT NOTES
 
 didn't write about this before, you need to make sure the simm3 files are formatted correcly.
 
@@ -100,7 +100,7 @@ then, delete any prefix (like the acronym for the game(like sfiii3-simm3.x) in a
 ex:("sfiii3-simm3.0", "sfiii3-simm3.1", "sfiii3-simm3.2", and "sfiii3-simm3.3", should be named "simm3.0", "simm3.1", "simm3.0", etc)
 
 
-on instrument chunk (or any chunk), don't start a file ripping from a blank space, start from the first pointer (or first entry, in the sample chunk)
+on instrument chunk (or any chunk), don't start a file ripping from a blank space, start from the first pointer (or first entry, in the sample chunk, or in the seqence chunk, rip from exacly 8 bytes before the actual firs song pointer  (es: 0x50 00 00 00 00 00 00 00))
 
 don't rip samplechunk with blank samples, but exacly until the last sample (before the blank space)
 
