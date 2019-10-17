@@ -18,7 +18,7 @@ struct key_split_struct {
     INT8 max_key;
 }; struct key_split_struct key_split[2048][128];
 //tables & converters
-UINT16 frequency_table[0x1800] = {
+UINT16 lfo_value_table[0x1800] = {
     0x0A4C, 0x0A4C, 0x0A4D, 0x0A4D, 0x0A4E, 0x0A4F, 0x0A4F, 0x0A50, 0x0A50,
     0x0A51, 0x0A52, 0x0A52, 0x0A53, 0x0A53, 0x0A54, 0x0A55, 0x0A55, 0x0A56,
     0x0A56, 0x0A57, 0x0A58, 0x0A58, 0x0A59, 0x0A59, 0x0A5A, 0x0A5B, 0x0A5B,
@@ -688,12 +688,16 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
     for (int i = 0; i < instr_count; i ++){
         (*is_instr_null)[i] = 0;
     }
+    UINT32 pointer_address = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
+    pointer_address -= 0x40;
     for (pos = 0; pos < 0x40; pos += 4){
         UINT32 bank_offset = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
         //the bank pointers are hard coded, instead of begin an pointer offset
         //this is bad because it would directly go to an unintended address, we need to subtract the actual start address of the bank pointer table
         //the first bank is always located in 0x40 + bank_offset, so we can subtract 0x40 to get that start address
-        bank_offset -= (bank_offset - 0x40);
+
+        //btw dont do bank_offset bank_offset -= (bank_offset - 0x40), because its just gonna reset itself to 0
+        bank_offset -= pointer_address;
         UINT32 bank_table_pos = pos;
         for (pos = bank_offset; pos < bank_offset + 0xff; pos += 2, CurIns ++){
             UINT16 inst_offset = ((data[pos] << 8) | data[pos + 1]);
@@ -1429,6 +1433,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             tot_tick ++;
                             mid_state.curDly ++;
                             note_lenght --;
+
                             if (note_lenght == 0){
                                 WriteEvent(&midi_inf, &mid_state ,0x80, note, velocity);
                             }
@@ -1481,19 +1486,6 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     }
                                     vibrato_value <<= 1;
                                     vibrato_value += 0x1839;
-                                    double duck = (note_bend_long - 0x2000);
-                                    duck *= 12;
-                                    duck /= 0x2000;
-                                    double weed = (vibrato_value - 0x2000);
-                                    weed *= rpn;
-                                    weed /= 0x2000;
-                                    double duckweed = duck + weed;
-                                    duckweed *= 0x2000;
-                                    duckweed /= rpn;
-                                    duckweed += 0x2000;
-                                    UINT16 actual_vibrato_value;
-                                    if (tot_tick == bend_tick) actual_vibrato_value = duckweed;
-                                    else actual_vibrato_value = vibrato_value;
                                     UINT8 val1 = (vibrato_value >> 0) & 0x7f;
                                     UINT8 val2 = (vibrato_value >> 7) & 0x7f;
                                     //WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
@@ -1584,3 +1576,4 @@ int main(){
     return 0;
 }
 //end
+
