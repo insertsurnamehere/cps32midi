@@ -1284,7 +1284,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     bend_tick = tot_tick;
                                     printf("pos = %x", pos);
                                 }
-                                note_bend_long = note_bend << 6;
+                                note_bend_long = note_bend;
                                 pos += 2;
                                 break;
                             }
@@ -1437,7 +1437,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             if (note_lenght == 0){
                                 WriteEvent(&midi_inf, &mid_state ,0x80, note, velocity);
                             }
-                            if (cur_lfo_tick <= tot_tick && vib_on && bend_on == 0){
+                            if (cur_lfo_tick <= tot_tick && vib_on){
                                 // vibrato code
                                 process_lfo(&vib_depth, &lfo_rate, &lfo_state, &lfo_limit, &cur_lfo_val, &lfo_increment);
                                 if (note){
@@ -1455,6 +1455,11 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     key_fraction = (key_fraction << 8) + 0x80 + vibrato_sensivity;
                                     vibrato_value = (cur_lfo_val >> 16) + key_fraction;
                                     UINT16 table_index = 0xc00;
+                                    //forgot the vibrato value lol
+                                    UINT32 nbend_backup = note_bend_long;
+                                    note_bend_long = ((note_bend_long << 1 + nbend_backup) << 10) >> 7;
+                                    vibrato_value += note_bend_long;
+                                    //and the other parameter is here, it does nothing, but i set it up here.
                                     parameter -= 0x40;
                                     INT32 parameter_long = (parameter << 8) >> 6;
                                     vibrato_value += parameter_long;
@@ -1488,7 +1493,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                     vibrato_value += 0x1839;
                                     UINT8 val1 = (vibrato_value >> 0) & 0x7f;
                                     UINT8 val2 = (vibrato_value >> 7) & 0x7f;
-                                    //WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
+                                    WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
                                     parameter = 0x40;
                                 }
                             }
