@@ -1185,7 +1185,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 29){
+            if (sequence == 0x28 && mid_state.midChn == 11){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -1202,12 +1202,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             UINT8 rpn = 0;
             UINT8 portamento = 0;
             UINT16 note_bend_long = 0x2000;
-            long note_bend_final = 0;
-            UINT8 note_on = 0;
             for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
-                if (mid_state.midChn == 0x9){
-                    UINT8 check2 = 1;
-                }
                 UINT8 master_loop = 0;
                 //printf("pos %x\t", pos);
                     if (data[pos] < 0x80){ //DELAY
@@ -1233,7 +1228,6 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             pos += 3;
                         }
                         WriteEvent(&midi_inf, &mid_state, 0x90, note, velocity);
-                        note_on = 1;
                         //printf("midi note %x", note);
                     }
                     else{
@@ -1271,21 +1265,26 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 //6144 / 12 = 512, 8192 / 12 = 682,7 (roughly)
                                 //8192 / 512 = 16, so to get 512 cents, you have 16 semitones
                                 //portamento works best with 12 semitones, but vibrato works with 16 (maybe)
-                                if (rpn != 16){
-                                    rpn = 16;
+                                if (rpn != 12){
+                                    rpn = 12;
                                     WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 00);
                                     WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 00);
-                                    WriteEvent(&midi_inf, &mid_state, 0xb0, 6, 16);
+                                    WriteEvent(&midi_inf, &mid_state, 0xb0, 6, 12);
                                     WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 0x7f);
                                     WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 0x7f);
                                 }
                                 //this is so stupid
                                 UINT8 note_bend = data[pos + 1];
-                                INT8 note_bend_signed = data[pos + 1];
-                                note_bend_final = note_bend_signed;
                                 bend_on = (note_bend > 0)? 1: 0;
                                 note_bend += 0x80;
-                                //WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
+
+                                if (!vib_on) WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
+                                else{
+                                    WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
+                                    bend_tick = tot_tick;
+                                    printf("pos = %x", pos);
+                                }
+                                note_bend_long = note_bend;
                                 pos += 2;
                                 break;
                             }
@@ -1434,60 +1433,72 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             tot_tick ++;
                             mid_state.curDly ++;
                             note_lenght --;
+
                             if (note_lenght == 0){
                                 WriteEvent(&midi_inf, &mid_state ,0x80, note, velocity);
-                                note_on = 0;
                             }
-                            if (cur_lfo_tick <= tot_tick && vib_on) process_lfo(&vib_depth, &lfo_rate, &lfo_state, &lfo_limit, &cur_lfo_val, &lfo_increment);
-                            if (note_on && (bend_on || vib_on)){
-                                INT8 sample_key = key_split[instr_number][note].sample_key + 26;
-                                INT8 vibrato_sensivity = key_split[instr_number][note].vib_sensitivity;
-                                key_fraction = (note - sample_key) + 7;
-                                key_fraction = (key_fraction << 8) + 0x80 + vibrato_sensivity;
-                                INT32 target_bend = key_fraction;
-                                if (cur_lfo_tick <= tot_tick && vib_on){
-                                    target_bend = (cur_lfo_val >> 16) + key_fraction;
-                                }
-                                if (bend_on){
-                                    UINT32 nbend_backup = note_bend_final;
-                                    note_bend_final = ((note_bend_final << 1 + nbend_backup) << 10) >> 7;
-                                    target_bend += note_bend_final;
-                                }
-                                UINT16 table_index = 0xc00;
-                                INT8 counter = 0;
-                                if (target_bend >= table_index){
-                                    while (target_bend >= table_index){
-                                        target_bend -= table_index;
-                                        counter ++;
-
+                            if (cur_lfo_tick <= tot_tick && vib_on){
+                                // vibrato code
+                                process_lfo(&vib_depth, &lfo_rate, &lfo_state, &lfo_limit, &cur_lfo_val, &lfo_increment);
+                                if (note){
+                                    if (rpn != 16){
+                                        rpn = 16;
+                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 00);
+                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 00);
+                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 6, 16);
+                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 0x7f);
+                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 0x7f);
                                     }
-                                }
-                                else {
-                                    if(target_bend >= 0.1){
-                                        //add 1 time, then stop
-                                        target_bend += table_index;
+                                    INT8 sample_key = key_split[instr_number][note].sample_key + 26;
+                                    INT8 vibrato_sensivity = key_split[instr_number][note].vib_sensitivity;
+                                    key_fraction = (note - sample_key) + 7;
+                                    key_fraction = (key_fraction << 8) + 0x80 + vibrato_sensivity;
+                                    vibrato_value = (cur_lfo_val >> 16) + key_fraction;
+                                    UINT16 table_index = 0xc00;
+                                    //forgot the vibrato value lol
+                                    UINT32 nbend_backup = note_bend_long;
+                                    note_bend_long = ((note_bend_long << 1 + nbend_backup) << 10) >> 7;
+                                    vibrato_value += note_bend_long;
+                                    //and the other parameter is here, it does nothing, but i set it up here.
+                                    parameter -= 0x40;
+                                    INT32 parameter_long = (parameter << 8) >> 6;
+                                    vibrato_value += parameter_long;
+                                    INT8 counter = 0;
+                                    if (vibrato_value >= table_index){
+                                        while (vibrato_value >= table_index){
+                                            vibrato_value -= table_index;
+                                            counter ++;
+
+                                         }
                                     }
                                     else {
-                                        //add 1 time
-                                        do{
-                                            target_bend += table_index;
-                                            counter --;
-                                            //then compare
-                                            if(target_bend >= 0.1){
-                                                break;
-                                            }
+                                        if(vibrato_value >= 0.1){
+                                            //add 1 time, then stop
+                                            vibrato_value += table_index;
                                         }
-                                        while (target_bend < 0.1);
+                                        else {
+                                            //add 1 time
+                                            do{
+                                                vibrato_value += table_index;
+                                                counter --;
+                                                //then compare
+                                                if(vibrato_value >= 0.1){
+                                                    break;
+                                                }
+                                            }
+                                            while (vibrato_value < 0.1);
+                                        }
                                     }
-                                    INT16 final_bend = target_bend;
-                                    INT16 test = lfo_value_table[(UINT16)final_bend];
-                                    UINT8 val1 = (final_bend >> 0) & 0x7f;
-                                    UINT8 val2 = (final_bend >> 7) & 0x7f;
+                                    vibrato_value <<= 1;
+                                    vibrato_value += 0x1839;
+                                    UINT8 val1 = (vibrato_value >> 0) & 0x7f;
+                                    UINT8 val2 = (vibrato_value >> 7) & 0x7f;
                                     WriteEvent(&midi_inf, &mid_state, 0xe0, val1, val2);
-                                    bend_on = 0;
+                                    parameter = 0x40;
                                 }
                             }
                             cur_lfo_tick += (cur_lfo_tick <= tot_tick) ? lfo_tick : 0;
+                            //if (check == 1) printf("current key fraction: 0x%x", key_fraction);
                         }
                     }
                 //printf("\t song %x\n", sequence);
@@ -1570,4 +1581,3 @@ int main(){
     return 0;
 }
 //end
-
