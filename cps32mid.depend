@@ -1,0 +1,32 @@
+# depslib dependency file v1.0
+1576694277 source:c:\users\lucma\downloads\cps32midi-master\cps32mid\main.c
+	<stdint.h>
+	<math.h>
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+	<assert.h>
+	"stdtype.h"
+	"midi_funcs.h"
+	"Soundfont.c"
+
+1569433780 c:\users\lucma\downloads\cps32midi-master\cps32mid\stdtype.h
+	<stdint.h>
+
+1569433780 c:\users\lucma\downloads\cps32midi-master\cps32mid\midi_funcs.h
+	<stdlib.h>
+	<string.h>
+	"stdtype.h"
+
+1569433780 c:\users\lucma\downloads\cps32midi-master\cps32mid\soundfont.c
+	<stdio.h>
+	<malloc.h>
+	<memory.h>
+	<string.h>
+	<stddef.h>
+	<time.h>
+	"stdtype.h"
+	"Soundfont.h"
+
+1569433780 c:\users\lucma\downloads\cps32midi-master\cps32mid\soundfont.h
+
