@@ -1178,9 +1178,10 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             UINT8 rpn = 0;
             UINT8 portamento = 0;
             UINT16 note_bend_long = 0x2000;
-            UINT8 note_bend_final = 0;
+            INT8 note_bend_final = 0;
             UINT8 note_on = 0;
-            UINT32 vibrato_final;
+            INT32 vibrato_final;
+            INT32 prev_bend = 0;
             for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
                 if (mid_state.midChn == 0x5){
                     UINT8 check2 = 1;
@@ -1250,7 +1251,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 //portamento works best with 12 semitones, but vibrato works with 16 (maybe)
                                 //this is so stupid
                                 UINT8 note_bend = data[pos + 1];
-                                note_bend_final = note_bend + 0x80;
+                                note_bend_final = note_bend;
                                 UINT8 wait = ((note_bend + 0x80) << 6) & 0x40;
                                 UINT8 what = ((note_bend + 0x80) >> 1) & 0x7f;
                                 bend_on = (note_bend > 0)? 1: 0;
@@ -1400,6 +1401,30 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                     }
                     if(delay_length){ //PROCESS DELAY
                         for(delay_length;  delay_length > 0; delay_length --){
+                            if (rpn != 12){
+                                rpn = 12;
+                                WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 00);
+                                WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 00);
+                                WriteEvent(&midi_inf, &mid_state, 0xb0, 6, 12);
+                                WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 0x7f);
+                                WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 0x7f);
+                            }
+                            /* INT8 sample_key = key_split[instr_number][note].sample_key + 26;
+                            INT8 vibrato_sensivity = key_split[instr_number][note].vib_sensitivity;
+                            key_fraction = (note - sample_key) + 7;
+                            key_fraction = (key_fraction << 8) + 0x80 + vibrato_sensivity;
+                            INT32 target_bend = key_fraction; */
+                            INT32 bend_final;
+                            bend_final = ((note_bend_final) << 6);
+                            if (vib_on){
+                                vibrato_final = (cur_lfo_val >> 16) << 1;
+                                bend_final += (vibrato_final);
+                            }
+                            if (bend_final != prev_bend){
+                                prev_bend = bend_final;
+                                bend_final += 0x2000;
+                                WriteEvent(&midi_inf, &mid_state, 0xe0 | mid_state.midChn, bend_final & 0x7f, (bend_final >> 7) & 0x7f);
+                            }
                             tot_tick ++;
                             mid_state.curDly ++;
                             note_lenght --;
@@ -1412,33 +1437,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
 
                             }
                             cur_lfo_tick += (cur_lfo_tick <= tot_tick) ? lfo_tick : 0;
-                            if (bend_on || vib_on){
-                                    if (rpn != 12){
-                                        rpn = 12;
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 00);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 00);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 6, 12);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 100, 0x7f);
-                                        WriteEvent(&midi_inf, &mid_state, 0xb0, 101, 0x7f);
-                                    }
-                                    /* INT8 sample_key = key_split[instr_number][note].sample_key + 26;
-                                    INT8 vibrato_sensivity = key_split[instr_number][note].vib_sensitivity;
-                                    key_fraction = (note - sample_key) + 7;
-                                    key_fraction = (key_fraction << 8) + 0x80 + vibrato_sensivity;
-                                    INT32 target_bend = key_fraction; */
-                                    INT32 bend_final;
-                                    if (bend_on){
-                                        bend_final = (note_bend_final) << 6;
-                                    }
-                                    else {
-                                        bend_final = 0x2000;
-                                    }
-                                    if (vib_on){
-                                        vibrato_final = (cur_lfo_val >> 16) << 1;
-                                        bend_final += (vibrato_final);
-                                    }
-                                    WriteEvent(&midi_inf, &mid_state, 0xe0 | mid_state.midChn, bend_final & 0x7f, (bend_final >> 7) & 0x7f);
-                            }
+
                         }
                     }
                 //printf("\t song %x\n", sequence);
