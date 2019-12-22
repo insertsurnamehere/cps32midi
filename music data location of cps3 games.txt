@@ -1,9 +1,11 @@
 sfiii3
 	instruments: 06788000
 	samples: 0678c000
-	songs: 0678f000 + 8
+	songs: 0678f000 + 8, size 42000(circa)
 sfiii2
-	songs: 0x06D537bc
+	songs: 0x06D533b8
+	samples: 6d4e2D4
+	instruments: 6d505d4
 jojo
 	instruments:0x06757ff8
 	samples:0x0675c000
