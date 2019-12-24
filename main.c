@@ -9,7 +9,7 @@
 #include "Soundfont.c"
 #define cps3_tick 16783.310
 UINT8 bank_flag[2048] = {0};
-UINT8 result_loop_times[16] = {0};
+UINT16 result_loop_times[16] = {0};
 //since the vibrato needs information from the instrument table, i need to make a struct accessible by the make_song function that contains that
 struct key_split_struct {
     UINT8 sample_key;
@@ -439,13 +439,14 @@ struct sample{
 };
 struct repeat{
     UINT32 start;
-    UINT8 times;
+    UINT16 times;
 }; struct repeat cps3_repeat[4];
 //sample merger
 void merge_sample_roms(UINT8 ** buffer_ptr){
 
     char filename[64];
     FILE * temp_file = fopen("simm3.0", "rb");
+    if (temp_file == NULL) printf("simm file not found");
     int file_pos = 0;
     int pos = 0;
     int file_count = 0;
@@ -557,6 +558,9 @@ UINT16 GenerateSampleTable(SF2_DATA* SF2Data, UINT8** RetLoopMsk, UINT8** root_k
             (*RetLoopMsk)[num_samples >> 3] |= 1 << (num_samples & 0x07);
         for (; sf2_smp_pos < sample_end + (num_samples * 46); sample_rom_pos ++, sf2_smp_pos++){
             smpdata[sf2_smp_pos] = (INT8)buffer[sample_rom_pos] * 0x100;
+            if (sf2_smp_pos == 4648){
+                UINT8 check = 1;
+            }
         }
         for (int extra_samples_pos = 0; extra_samples_pos < 46; extra_samples_pos ++, sf2_smp_pos++){
             smpdata[sf2_smp_pos] = 0x00;
@@ -896,7 +900,7 @@ const void make_soundfont(const char* FileName, UINT8 bank_to_copy){
 	return;
 }
 //midi
-const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
+const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
     UINT32 start = pos;
     UINT32 seq_offset = 0;
     UINT16 chn_offset = 0;
@@ -1046,10 +1050,19 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel){
             master_channel = temp_chn_count;
         }
     }
+    float loop_times;
     //printf("\nsong lenght is %x\n", song_lenght);
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
+        if (temp_chn_count == 11 && sequence == 15){
+            UINT8 check1 = 1;
+        }
         if (chn_loop_size[temp_chn_count] < song_lenght){
-            result_loop_times[temp_chn_count] = ceil((song_lenght * 3 / chn_loop_size[temp_chn_count]) - 1);
+            result_loop_times[temp_chn_count] = (song_lenght / chn_loop_size[temp_chn_count]);
+            loop_times = result_loop_times[temp_chn_count];
+            result_loop_times[temp_chn_count] *= 3;
+            loop_times = result_loop_times[temp_chn_count];
+            result_loop_times[temp_chn_count] -= 1;
+            loop_times = result_loop_times[temp_chn_count];
         }
         else result_loop_times[temp_chn_count] = 2;
        //printf("channel %x's loop times should be %x\n", temp_chn_count, result_loop_times[temp_chn_count]);
@@ -1252,9 +1265,6 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                                 //this is so stupid
                                 UINT8 note_bend = data[pos + 1];
                                 note_bend_final = note_bend;
-                                UINT8 wait = ((note_bend + 0x80) << 6) & 0x40;
-                                UINT8 what = ((note_bend + 0x80) >> 1) & 0x7f;
-                                bend_on = (note_bend > 0)? 1: 0;
                                 //WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
                                 pos += 2;
                                 break;
@@ -1501,7 +1511,7 @@ const void make_music_data(){
         if (song_id ==  7){
             UINT8 check = 1;
         }
-        analyze_song(data, pos, master_channel);
+        analyze_song(data, pos, master_channel, song_id);
         //then, make the midi
         make_song(data, pos, master_channel, song_id);
         //and, finally, write the song to a new midi file
