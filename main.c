@@ -17,7 +17,7 @@ struct key_split_struct {
     INT8 min_key;
     INT8 max_key;
 }; struct key_split_struct key_split[2048][128];
-//tables & converters
+//tables & converters from vgmtrans
 UINT8 rate_convert(INT16 env, UINT8 type, INT16 *new_env){
         //from vgmtrans source code (QsoundInstr.h)
         const uint16_t linear_table[128] = {
@@ -70,11 +70,11 @@ UINT8 rate_convert(INT16 env, UINT8 type, INT16 *new_env){
     }
     return 1;
 }
-double ConvertPercentAmplitudeToAttenDB_SF2(double percent) {
-  if (percent == 0)
-    return 100.0;        // assume 0 is -100.0db attenuation
-  double atten = 20 * log10(percent);
-  return !(-atten<100.0)?-atten:100.0;
+double ConvertPercentAmplitudeToAttenDB_SF2(double percent) {     // assume 0 is -100.0db attenuation
+      if (percent == 0)
+        return 100.0;
+      double atten = 20 * log10(percent);
+      return (atten < 100)? -atten: 100.0;
 }
 double LinAmpDecayTimeToLinDBDecayTime(double secondsToFullAtten, int linearVolumeRange) {
   double expMinDecibel = -100.0;
@@ -87,6 +87,10 @@ double Log2(double n){
 }
 double SecondsToTimecents(double secs) {
   return log(secs) / log((double) 2) * 1200;
+}
+uint8_t linear2midi(double percent) {
+  percent = log(percent / (double)0x7F) / log(2.0) * 6.0;
+  return (UINT8)(pow(10.0, percent / 40.0) * 0x7F + 0.5);
 }
 //structs
 struct sample{
@@ -245,18 +249,21 @@ const void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, I
 
     //actually, im going to "disassemble" the code for the envelopes, and sort-of compare them...
     //not happy with the result i have now, also the mixing is bad...
-    UINT16 temp_pointer[5] = {0};
+    UINT16 temp_pointer[6] = {0};
     rate_convert(*atk, 2, &temp_pointer[0]);
     rate_convert(*dec, 1, &temp_pointer[1]);
     rate_convert(*sus, 0, &temp_pointer[2]);
     rate_convert(*srt, 1, &temp_pointer[3]);
     rate_convert(*rel, 1, &temp_pointer[4]);
+    temp_pointer[5] = *vol;
     double ticks = 0;
     double atk_rate = (double)temp_pointer[0];
     double dec_rate = (double)temp_pointer[1];
     double sus_levl = (double)temp_pointer[2];
     double sus_rate = (double)temp_pointer[3];
     double rel_rate = (double)temp_pointer[4];
+
+    double volume = (double)temp_pointer[5];
     //ATTACK ENVELOPE
     ticks = atk_rate ? atk_rate / 0xffff : 0;
     atk_rate = (atk_rate == 0xffff) ? 0 : ticks * cps3_tick;
@@ -281,16 +288,21 @@ const void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, I
     ticks = rel_rate ? 0xFFFF / rel_rate : 0;
     rel_rate = (rel_rate == 0xFFFF) ? 0 : ticks * cps3_tick;
     rel_rate = LinAmpDecayTimeToLinDBDecayTime(rel_rate, 0x800);
-    atk_rate = (atk_rate == 0) ? -32768 : log(atk_rate) / log((double)2) * 1200;
-    dec_rate = (dec_rate == 0) ? -32768 : log(dec_rate) / log((double)2) * 1200;
+    //btw it was log2() MULTIPLYED by 1200, not divided
+    atk_rate = (atk_rate == 0) ? -32768 : Log2(atk_rate) * 1200;
+    dec_rate = (dec_rate == 0) ? -32768 : log2(dec_rate) * 1200;
+    sus_levl = ConvertPercentAmplitudeToAttenDB_SF2(sus_levl);
     sus_levl = (sus_levl >= 100) ? 1000 : 10 * sus_levl;
-    sus_rate = (sus_rate == 0) ? -32768 : log(sus_rate) / log((double)2) * 1200;
-    rel_rate = (rel_rate == 0) ? -32768 : log(rel_rate) / log((double)2) * 1200;
+    sus_rate = (sus_rate == 0) ? -32768 : log2(sus_rate) * 1200;
+    rel_rate = (rel_rate == 0) ? -32768 : Log2(rel_rate) * 1200;
+    volume += 64;
+    volume = 0 - (log10(127 / volume) * 200);
     *atk = RoundTo16(atk_rate);
     *dec = RoundTo16(dec_rate);
     *sus = RoundTo16(sus_levl);
     *srt = RoundTo16(sus_rate);
     *rel = RoundTo16(rel_rate);
+    *vol = RoundTo16(volume);
     //
     return;
 }
@@ -375,7 +387,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                         loop_mode = 0x01;	// Loop on
                     else
                         loop_mode = 0x00; // Loop off
-                    INT8 VOL = data[pos + 1];
+                    INT16 VOL = data[pos + 2];
                     INT16 atk = data[pos + 7];//attack
                     INT16 dec = data[pos + 8];//decay
                     INT16 sus = data[pos + 9];//sustain level
@@ -388,11 +400,13 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                     AddInsGen_U16(&InsGenAlloc, &InsGenCnt, &InsGen, sampleModes, loop_mode);
                     AddInsGen_U16(&InsGenAlloc, &InsGenCnt, &InsGen, sampleID, sample_id);
                     AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, attackVolEnv, atk); //evndata & 0x7fff
+                    //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, holdVolEnv, srt);
                     AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, decayVolEnv, dec);
-                    AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
+                    //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
                     AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, releaseVolEnv, rel);
+                    //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, initialAttenuation, VOL);
                     //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, fineTune, -32);
-                    //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, velocity, srt);
+                    //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, velocity, VOL);
                     end_instr = (data[pos + 12] << 8) | data[pos + 13];
                     for (int note = LastNote; note <= CurNote; note ++){
                         INT8 vib_sensitivity = data[pos + 6];
@@ -572,8 +586,12 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
     UINT8 start_loop_times = 0;
     UINT16 max_chn;
     UINT8 vib_cnt = 0;
+    UINT8 check1 = 0;
     seq_offset = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
         for (pos = seq_offset + 1; pos < seq_offset + 33 ; pos += 2){
+            if (sequence == 0x26 && temp_chn_count == 0){
+                check1 = 1;
+            }
             chn_offset = ((data[pos] << 8) | data[pos + 1]);
             song_table_pos = pos;
             if (chn_offset != 0x0000){
@@ -641,6 +659,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
                         type = data[pos] - 0xd4;
                             if(cps3_repeat[type].times == 0){
                                 cps3_repeat[type].times = data[pos + 1];
+                                UINT8 times = data[pos + 1];
                                 if (cps3_repeat[type].times == 0 || cps3_repeat[type].times >= 0x7e){
                                         //forgot to put the skip, so here it is.
                                         pos += 2;
@@ -674,6 +693,11 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
                 }
                 tot_delay += delay;
                 delay = 0;
+                if (check1 >= 1) printf("\n pos = %x", pos);
+                if (pos == 0x1b267){
+                    check1 = 2;
+                    printf("%x", data[pos]);
+                }
             }
             chn_tot_size[temp_chn_count] = tot_delay;
             tot_delay = 0;
@@ -686,7 +710,11 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
         }
         else temp_chn_count ++;
     }
+    song_lenght = 0;
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
+        if (temp_chn_count == 0 && sequence == 26){
+            UINT8 check1 = 1;
+        }
         if (song_lenght < chn_loop_size[temp_chn_count]){
             song_lenght = chn_loop_size[temp_chn_count];
             master_channel = temp_chn_count;
@@ -694,6 +722,9 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
     }
     UINT16 min_start = 0xffff;
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
+        if (temp_chn_count == 0 && sequence == 26){
+            UINT8 check1 = 1;
+        }
         if (chn_loop_size[temp_chn_count] == 0) chn_loop_size[temp_chn_count] = song_lenght;
         if (chn_loop_size[temp_chn_count] == song_lenght && min_start > chn_loop_start[temp_chn_count]){
             min_start = chn_loop_start[temp_chn_count];
@@ -703,7 +734,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
     double loop_times;
     //printf("\nsong lenght is %x\n", song_lenght);
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
-        if (temp_chn_count == 11 && sequence == 15){
+        if (temp_chn_count == 0 && sequence == 26){
             UINT8 check1 = 1;
         }
         if (chn_loop_size[temp_chn_count] < song_lenght){
@@ -764,8 +795,21 @@ const void portamento_fix(double semitone, UINT8 new_rpn){
     INT16 portamento = semitone * 8192 / new_rpn;
     return;
 }
-
 const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
+    static const UINT16 vol_table[128] = {
+        0, 0xA, 0x18, 0x26, 0x34, 0x42, 0x51, 0x5F, 0x6E, 0x7D, 0x8C, 0x9B, 0xAA,
+        0xBA, 0xC9, 0xD9, 0xE9, 0xF8, 0x109, 0x119, 0x129, 0x13A, 0x14A, 0x15B,
+        0x16C, 0x17D, 0x18E, 0x1A0, 0x1B2, 0x1C3, 0x1D5, 0x1E8, 0x1FC, 0x20D, 0x21F,
+        0x232, 0x245, 0x259, 0x26C, 0x280, 0x294, 0x2A8, 0x2BD, 0x2D2, 0x2E7, 0x2FC,
+        0x311, 0x327, 0x33D, 0x353, 0x36A, 0x381, 0x398, 0x3B0, 0x3C7, 0x3DF, 0x3F8,
+        0x411, 0x42A, 0x443, 0x45D, 0x477, 0x492, 0x4AD, 0x4C8, 0x4E4, 0x501, 0x51D,
+        0x53B, 0x558, 0x577, 0x596, 0x5B5, 0x5D5, 0x5F5, 0x616, 0x638, 0x65A, 0x67D,
+        0x6A1, 0x6C5, 0x6EB, 0x711, 0x738, 0x75F, 0x788, 0x7B2, 0x7DC, 0x808, 0x834,
+        0x862, 0x891, 0x8C2, 0x8F3, 0x927, 0x95B, 0x991, 0x9C9, 0xA03, 0xA3F,
+        0xA7D, 0xABD, 0xAFF, 0xB44, 0xB8C, 0xBD7, 0xC25, 0xC76, 0xCCC,
+        0xD26, 0xD85, 0xDE9, 0xE53, 0xEC4, 0xF3C, 0xFBD, 0x1048, 0x10DF,
+        0x1184, 0x123A, 0x1305, 0x13EA, 0x14F1, 0x1625, 0x179B, 0x1974, 0x1BFB, 0x1FFD
+    };
     double msec_tick = 0;
     UINT8 vib_tick_count = 0;
     UINT8 bpm = 0;
@@ -824,7 +868,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 9){
+            if (sequence == 26){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -846,7 +890,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             INT32 vibrato_final;
             INT32 prev_bend = 0;
             for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
-                if (mid_state.midChn == 0x5){
+                if (mid_state.midChn == 0x00){
                     UINT8 check2 = 1;
                 }
                 UINT8 master_loop = 0;
@@ -946,7 +990,9 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             }
                             case 0xc6:{ //CHANNEL VOLUME
                                 //printf("0xc6 in pos %x", pos);
-                                WriteEvent(&midi_inf, &mid_state, 0xb0, 7, data[pos + 1] & 0x7f);
+                                UINT8 ch_vol1 = data[pos + 1];
+                                ch_vol1 = linear2midi(ch_vol1);
+                                WriteEvent(&midi_inf, &mid_state, 0xb0, 7, ch_vol1 & 0x7f);
                                 pos += 2;
                                 break;
                             }
@@ -959,7 +1005,9 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             }
                             case 0xc8:{ //CHANNEL VOLUME 2
                                 //printf("0xc8 in pos %x", pos);
-                                WriteEvent(&midi_inf, &mid_state, 0xb0, 11, data[pos + 1] & 0x7f);
+                                UINT8 ch_vol2 = data[pos + 1];
+                                ch_vol2 = linear2midi(ch_vol2);
+                                WriteEvent(&midi_inf, &mid_state, 0xb0, 11, ch_vol2 & 0x7f);
                                 pos += 2;
                                 break;
                             }
@@ -978,8 +1026,12 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                             case 0xd4:case 0xd5:case 0xd6:case 0xd7:{ //REPEAT FROM REPEAT OF THE SAME TYPE ( ͡q͜ʖ͡q)
                                 //printf("repeat in pos %x\tin the midi file, loop point now is %x\t", pos, midi_inf.pos);
                                 type = data[pos] - 0xd4; //d4 has type 0, d5 has type 1, d6 has type 2, and d7 has type 3
+                                if (sequence == 26 && mid_state.midChn == 0 && data[pos] == 0xd5){
+                                    UINT8 check3 = 1;
+                                }
                                 if(cps3_repeat[type].times == 0){
                                     cps3_repeat[type].times = data[pos + 1]; //reads how many times this repeat command should be processed
+                                    UINT16 loops = cps3_repeat[type].times;
                                     //printf("repeat %x begin (times %x)", cps3_repeat[type].start, cps3_repeat[type].times);
                                     if (cps3_repeat[type].times == 0 || cps3_repeat[type].times >= 0x7e){
                                         if (mid_state.midChn == master_channel) {
