@@ -272,7 +272,7 @@ const void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, I
         ticks = (long) ceil((0xFFFF - sus_levl) / (double) dec_rate);
         ticks += (long) ceil(sus_levl / (double) sus_rate);
         dec_rate = ticks * cps3_tick;
-        sus_levl = 0;
+        sus_levl = .00000001;
     } else {
         ticks = dec_rate ? (0xFFFF / dec_rate) : 0;
         dec_rate = (dec_rate == 0xFFFF) ? 0 : ticks * cps3_tick;
@@ -292,7 +292,7 @@ const void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, I
     atk_rate = (atk_rate == 0) ? -32768 : Log2(atk_rate) * 1200;
     dec_rate = (dec_rate == 0) ? -32768 : log2(dec_rate) * 1200;
     sus_levl = ConvertPercentAmplitudeToAttenDB_SF2(sus_levl);
-    sus_levl = (sus_levl >= 100) ? 1000 : 10 * sus_levl;
+    sus_levl = (sus_levl >= 100) ? 1000 : 5 * sus_levl;
     sus_rate = (sus_rate == 0) ? -32768 : log2(sus_rate) * 1200;
     rel_rate = (rel_rate == 0) ? -32768 : Log2(rel_rate) * 1200;
     volume += 64;
@@ -564,7 +564,7 @@ const void make_soundfont(const char* FileName, UINT8 bank_to_copy){
 	return;
 }
 //midi
-const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
+const UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
     UINT32 start = pos;
     UINT32 seq_offset = 0;
     UINT16 chn_offset = 0;
@@ -589,9 +589,6 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
     UINT8 check1 = 0;
     seq_offset = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
         for (pos = seq_offset + 1; pos < seq_offset + 33 ; pos += 2){
-            if (sequence == 0x26 && temp_chn_count == 0){
-                check1 = 1;
-            }
             chn_offset = ((data[pos] << 8) | data[pos + 1]);
             song_table_pos = pos;
             if (chn_offset != 0x0000){
@@ -605,6 +602,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
             cps3_repeat[3].times = 0;
 
                 for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
+                    if (data[pos] == 0xff) break;
                     if (data[pos] < 0x80){
                         delay = data[pos];
                         while (data[pos + 1] < 0x80){
@@ -646,7 +644,6 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
                         case 0xd0:case 0xd1:case 0xd2:case 0xd3:{
                             type = data[pos] - 0xd0;
                             if (cps3_repeat[loop_start_type].times == 0 && type == loop_start_type){
-                                loop_start_type = type;
                                 chn_loop_start[temp_chn_count] = tot_delay;
                                 temp_loop_start[loop_start_type] = chn_loop_start[temp_chn_count];
                             }
@@ -657,6 +654,12 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
                         }
                     case 0xd4:case 0xd5:case 0xd6:case 0xd7:{
                         type = data[pos] - 0xd4;
+                            if (type == 1){
+                                UINT8 check2 = 1;
+                                if (sequence == 0x1a && temp_chn_count == 0){
+                                    UINT8 check3 = 1;
+                                }
+                            }
                             if(cps3_repeat[type].times == 0){
                                 cps3_repeat[type].times = data[pos + 1];
                                 UINT8 times = data[pos + 1];
@@ -665,6 +668,9 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
                                         pos += 2;
                                         if (type != loop_start_type){
                                             chn_loop_start[temp_chn_count] = temp_loop_start[loop_start_type];
+                                            loop_start_type = type;
+                                            chn_loop_end[temp_chn_count] = tot_delay;
+                                            chn_loop_size[temp_chn_count] = (chn_loop_end[temp_chn_count] - chn_loop_start[temp_chn_count]);
                                         }
                                         else if (type == loop_start_type){
                                             chn_loop_end[temp_chn_count] = tot_delay;
@@ -693,11 +699,6 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
                 }
                 tot_delay += delay;
                 delay = 0;
-                if (check1 >= 1) printf("\n pos = %x", pos);
-                if (pos == 0x1b267){
-                    check1 = 2;
-                    printf("%x", data[pos]);
-                }
             }
             chn_tot_size[temp_chn_count] = tot_delay;
             tot_delay = 0;
@@ -707,6 +708,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
             }
             pos = song_table_pos;
             max_chn = temp_chn_count;
+            check1 = 0;
         }
         else temp_chn_count ++;
     }
@@ -754,7 +756,7 @@ const void analyze_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seq
     cps3_repeat[2].times = 0;
     cps3_repeat[3].times = 0;
     pos = start;
-    return;
+    return 1;
 }
 //process the current lfo value
 /*the lfo works like this:
@@ -795,7 +797,7 @@ const void portamento_fix(double semitone, UINT8 new_rpn){
     INT16 portamento = semitone * 8192 / new_rpn;
     return;
 }
-const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
+const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
     static const UINT16 vol_table[128] = {
         0, 0xA, 0x18, 0x26, 0x34, 0x42, 0x51, 0x5F, 0x6E, 0x7D, 0x8C, 0x9B, 0xAA,
         0xBA, 0xC9, 0xD9, 0xE9, 0xF8, 0x109, 0x119, 0x129, 0x13A, 0x14A, 0x15B,
@@ -868,7 +870,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 26){
+            if (sequence == 10){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -907,7 +909,8 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
                     else if (data[pos] < 0xc0){ //NOTE ON
                         //1°st byte is the note's velocity, the 2°nd is the note's pitch, 3°rd is the note's duration
                         velocity = (data[pos] - 0x80) * 2;
-                        note = data[pos + 1];
+                        velocity = linear2midi((double) velocity);
+                        note = (data[pos + 1]) & 0x7f; //song 10 in jojo has 0xc1 as notes (?)
                         octave = floor((double)note / 12);
                         if(data[pos + 2] >= 0x80) // if the 3°rd byte is bigger that 0x80, the 3°rd and 4°th byte get combined, and become the note's duration
                         {
@@ -1170,7 +1173,7 @@ const void make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequen
     midi_inf.pos = 0x00;
     WriteMidiHeader(&midi_inf, 0x0001, mid_state.midChn, 0x30);
     write_song(midi_data, midi_length, sequence);
-    return;
+    return 1;
 }
 const void write_song(UINT8 * data, UINT32 length, int song_id){
     char filename[64];
@@ -1233,4 +1236,5 @@ int main(){
     return 0;
 }
 //end
+
 
