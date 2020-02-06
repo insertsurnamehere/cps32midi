@@ -72,6 +72,7 @@ it's a work in progress, i need to finish the vibrato code, also i don't like th
 
 i know my descriptions suck, 
 deal  with it >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>:(
+(it really sucks, sorry for this mess, will update later)
 
 JOJO MIDIS
 
