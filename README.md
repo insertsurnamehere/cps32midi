@@ -27,7 +27,7 @@ The placement of these are different for each game, and migth be dependent on th
 (basicly, in the board itself, there are 7 slots where a memory expansion chip can be placed, for this boards there are 3 types of chips (these are the simms) that can be placed in these slots, and each game REQUIRES a specific arrangement of these types of chips, and maybe that can shifth the actual addresses of the sample, instrument, and sequence data)
 
 One advice for using this program: DONT
-unless you hav some expirience with the mame debugger, i don't know of a reliable way to find it, but there is a sound test, that cloud be useful, and these have a "consistent" byte size, but if you value your insanity: DONT.
+unless you hav some expirience with the mame debugger, i don't know of a reliable way to find it, but there is a sound test, that cloud be useful, and these have a "consistent" byte size, but if you value your sanity: DONT.
 
 Here is the structure of the samplebank, instrumentbank and the sequence data.
 
