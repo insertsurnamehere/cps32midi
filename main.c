@@ -8,17 +8,17 @@
 #include "midi_funcs.h"
 #include "Soundfont.c"
 #define cps3_tick (1/(251/4.0))
-UINT8 bank_flag[2048] = {0};
+UINT8 bank_flag[2049] = {0};
 UINT16 result_loop_times[16] = {0};
 //since the vibrato needs information from the instrument table, i need to make a struct accessible by the make_song function that contains that
 struct key_split_struct {
     UINT8 sample_key;
+    INT8 detune;
     INT8 min_key;
     INT8 max_key;
-    INT8 detune;
 }; struct key_split_struct key_split[2048][128];
 //tables & converters from vgmtrans
-UINT8 rate_convert(UINT16 env, UINT8 type, UINT16 *new_env){
+UINT8 rate_convert(INT16 env, UINT8 type, INT16 *new_env){
         //from vgmtrans source code (QsoundInstr.h)
         const uint16_t linear_table[128] = {
         0, 0x3FF, 0x5FE, 0x7FF, 0x9FE, 0xBFE, 0xDFD, 0xFFF, 0x11FE, 0x13FE,
@@ -86,7 +86,13 @@ double Log2(double n){
     return log( n ) / log( 2 );
 }
 double SecondsToTimecents(double secs) {
-  return log(secs) / log((double) 2) * 1200;
+  INT16 result = 0;
+  if (secs < 0.0001) result = -32768;
+  else{
+    result = log2(secs) * 1200;
+  }
+  RoundTo16(result);
+  return (INT16)result;
 }
 uint8_t linear2midi(double percent) {
   percent = log(percent / (double)0x7F) / log(2.0) * 6.0;
@@ -105,7 +111,7 @@ struct repeat{
     UINT16 times;
 }; struct repeat cps3_repeat[4];
 //sample merger
-static void merge_sample_roms(UINT8 ** buffer_ptr){
+UINT32 merge_sample_roms(UINT8 ** buffer_ptr){
 
     char filename[64];
     FILE * temp_file = fopen("simm3.0", "rb");
@@ -120,6 +126,7 @@ static void merge_sample_roms(UINT8 ** buffer_ptr){
         temp_file = fopen(filename, "rb");
         if (temp_file == NULL) break;
         tot_files ++;
+        fclose(temp_file);
     }
     FILE * file[tot_files];
     int size[tot_files];
@@ -145,7 +152,7 @@ static void merge_sample_roms(UINT8 ** buffer_ptr){
     for (file_count = 0; file_count < tot_files; file_count ++){
         fclose(file[file_count]);
     }
-    return;
+    return tot_size;
 }
 //sound font
 UINT16 GenerateSampleTable(SF2_DATA* SF2Data, UINT8** RetLoopMsk, UINT8** root_key_array){
@@ -155,87 +162,76 @@ UINT16 GenerateSampleTable(SF2_DATA* SF2Data, UINT8** RetLoopMsk, UINT8** root_k
         exit(EXIT_FAILURE);
     }
     fseek(samplfile, 0, SEEK_END);
-    unsigned int size = ftell(samplfile);
+    int size = ftell(samplfile);
     printf("the size of sample rom is %x\n", size);
     rewind(samplfile);
     UINT8 * data = malloc(size * sizeof(char));
     fread(data, sizeof(char), size, samplfile);
     fclose(samplfile);
     UINT32 pos = 0x00;
-    UINT32 num_samples = (size / 16) + 1;
-    struct sample cps3_samples[num_samples];
-    for (pos = 0; pos < size; pos += 16){
-        num_samples = pos / 16;
-        cps3_samples[num_samples].start = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
-        cps3_samples[num_samples].loop = ((data[pos + 4] << 24) | (data[pos + 5] << 16) | (data[pos + 6] << 8) | data[pos + 7]);
-        cps3_samples[num_samples].end = ((data[pos + 8] << 24) | (data[pos + 9] << 16) | (data[pos + 10] << 8) | data[pos + 11]);
-        cps3_samples[num_samples].size = cps3_samples[num_samples].end - cps3_samples[num_samples].start;
-        //if (cps3_samples[num_samples].loop >= cps3_samples[num_samples].end) cps3_samples[num_samples].size -= 46;
-        cps3_samples[num_samples].loop = cps3_samples[num_samples].loop - cps3_samples[num_samples].start;
-        cps3_samples[num_samples].key = data[pos + 15];
-
+    UINT32 tot_samples = (size / 16);
+    sfSample sf2_sample[tot_samples + 2];
+    memset(sf2_sample, 0, tot_samples + 2);
+    for (int i = 0; i < tot_samples + 2; i++){
+        sprintf(sf2_sample[i].achSampleName, "0");
+        sf2_sample[i].dwStart = 0;
+        sf2_sample[i].dwEnd = 0;
+        sf2_sample[i].dwStartloop = 0;
+        sf2_sample[i].dwEndloop = 0;
+        sf2_sample[i].byOriginalKey = 0;
+        sf2_sample[i].dwSampleRate = 0;
+        sf2_sample[i].chCorrection = 0;
+        sf2_sample[i].sfSampleType = monoSample;
+        sf2_sample[i].wSampleLink = 0;
     }
-    printf("total samples: %x", num_samples);
-    unsigned int tot_samples = num_samples + 2;
-    sfSample sf2_sample[tot_samples + 1];
-    memset(sf2_sample, 0, tot_samples + 1);
-    *root_key_array = malloc(tot_samples);
-    memset(*root_key_array, 0, tot_samples);
-    sfSample * tmp_sample;
+    *RetLoopMsk = (UINT8*)malloc(size);
+    memset(*RetLoopMsk, 0, size);
+    UINT32 padding = (tot_samples * 46);
+    UINT32 num_samples = 0;
     UINT8 * buffer;
-    merge_sample_roms(&buffer);
-    UINT32 sample_rom_pos = 0;
-    UINT32 tot_size = cps3_samples[num_samples].end ;
-    UINT8 * wav_data = malloc(sizeof(char) * tot_size);
-    UINT16 * smpdata = malloc(sizeof(INT16) * (tot_size + (tot_samples * 46)));
-    INT64 check = sizeof(INT16) * (tot_size + (tot_samples * 46));
-    UINT32 SmplHdrSize = sizeof(sfSample) * (tot_samples + 2);
-    UINT64 sample_size;
-    UINT64 sample_start;
-    UINT64 sample_end;
-    UINT64 sample_loop;
-    UINT8 sample_key;
-    UINT32 sf2_smp_pos = 0;
-    *RetLoopMsk = (UINT8*)malloc(pos);
-	memset(*RetLoopMsk, 0x00, pos);
-    for (num_samples = 0; num_samples < tot_samples - 1; num_samples ++){
-        sample_size = cps3_samples[num_samples].size;
-        sample_start = cps3_samples[num_samples].start;
-        sample_end = cps3_samples[num_samples].end;
-        sample_key = cps3_samples[num_samples].key;
-        sample_loop = cps3_samples[num_samples].loop;
-        (*root_key_array)[num_samples] = sample_key - 26;
-        tmp_sample = &sf2_sample[num_samples];
-        memset(tmp_sample, 0x00, sizeof(sfSample));
-        sprintf(tmp_sample->achSampleName, "Sample %d", num_samples);
-        sf2_sample[num_samples].dwSampleRate = 8200;
-        sf2_sample[num_samples].byOriginalKey = sample_key;
-        sf2_sample[num_samples].chCorrection = 0;
-		sf2_sample[num_samples].wSampleLink = 0;
-		sf2_sample[num_samples].sfSampleType = monoSample;
-		sf2_sample[num_samples].dwStart = cps3_samples[num_samples].start + (num_samples * 46);
-		sf2_sample[num_samples].dwEnd = cps3_samples[num_samples].end + (num_samples * 46);
-		sf2_sample[num_samples].dwStartloop = cps3_samples[num_samples].start + cps3_samples[num_samples].loop + (num_samples * 46);
-        sf2_sample[num_samples].dwEndloop = cps3_samples[num_samples].end + (num_samples * 46);
-        if  (sample_loop < sample_end)
-            (*RetLoopMsk)[num_samples >> 3] |= 1 << (num_samples & 0x07);
-        for (; sf2_smp_pos < sample_end + (num_samples * 46); sample_rom_pos ++, sf2_smp_pos++){
-            smpdata[sf2_smp_pos] = (INT8)buffer[sample_rom_pos] * 0x100;
-        }
-        for (int extra_samples_pos = 0; extra_samples_pos < 46; extra_samples_pos ++, sf2_smp_pos++){
-            smpdata[sf2_smp_pos] = 0x00;
-        }
+    UINT32 samp_data_size = merge_sample_roms(&buffer);
+    UINT16* samp_data = malloc((samp_data_size + padding) * sizeof(UINT16));
+    memset(samp_data, 0, samp_data_size + padding);
+    for (UINT32 x = 0; x < samp_data_size + padding; x++){
+        samp_data[x] = 0;
     }
-    tmp_sample = &sf2_sample[num_samples];
-	memset(tmp_sample, 0x00, sizeof(sfSample));
-	sprintf(tmp_sample->achSampleName, "EOS");
-    UINT32 SmplDBSize = sizeof(INT16) * (tot_size + (num_samples * 46));
-	SmplHdrSize = sizeof(sfSample) * (tot_samples);
+    UINT32 sf2_smp_pos = 0;
+    UINT32 sample_rom_pos = 0;
+    *root_key_array = malloc(tot_samples * sizeof(UINT8));
+	memset(*root_key_array, 0x00, tot_samples);
+    for (int x = 0; x < tot_samples; x++){
+        (*root_key_array)[x] = 0;
+    }
+    for (; pos < size; pos += 16, num_samples++){
+        padding = (num_samples * 46);
+        sprintf(sf2_sample[num_samples].achSampleName, "Sample %d", num_samples);
+        UINT32 start = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
+        UINT32 loopstart = ((data[pos + 4] << 24) | (data[pos + 5] << 16) | (data[pos + 6] << 8) | data[pos + 7]);
+        UINT32 end = ((data[pos + 8] << 24) | (data[pos + 9] << 16) | (data[pos + 10] << 8) | data[pos + 11]);
+        INT8 key = data[pos + 15] & 0x7f;
+        if (loopstart < end){
+            (*RetLoopMsk)[num_samples >> 3] |= 1 << (num_samples & 0x07);
+        }
+        sf2_sample[num_samples].dwStart = start + padding;
+        sf2_sample[num_samples].dwEnd = end + padding;
+        sf2_sample[num_samples].dwStartloop = loopstart + padding;
+        sf2_sample[num_samples].dwEndloop = end + padding;
+        sf2_sample[num_samples].byOriginalKey = key;
+        sf2_sample[num_samples].dwSampleRate = 8200;
+        (*root_key_array)[num_samples] = key - 26;
+        for (; sf2_smp_pos < end + padding; sample_rom_pos ++, sf2_smp_pos++)
+            samp_data[sf2_smp_pos] = (INT8)buffer[sample_rom_pos] * 0x100;
+        for (int extra_samples_pos = 0; extra_samples_pos < 46; extra_samples_pos ++, sf2_smp_pos++)
+            samp_data[sf2_smp_pos] = 0x00;
+    }
+    sprintf(sf2_sample[tot_samples].achSampleName, "EOS");
+    UINT32 SmplDBSize = sizeof(INT16) * (samp_data_size + (num_samples * 46));
+	UINT32 SmplHdrSize = sizeof(sfSample) * (tot_samples + 1);
 	LIST_CHUNK * LstChk = List_GetChunk(SF2Data->Lists, FCC_sdta);
-	ITEM_CHUNK * ItmChk = Item_MakeChunk(FCC_smpl, SmplDBSize, smpdata, 0x00);
+	ITEM_CHUNK * ItmChk = Item_MakeChunk(FCC_smpl, SmplDBSize, samp_data, 0x00);
 	List_AddItem(LstChk, ItmChk);
 	LstChk = List_GetChunk(SF2Data->Lists, FCC_pdta);
-	ItmChk = Item_MakeChunk(FCC_shdr, SmplHdrSize, sf2_sample, 0x00);	// no free() needed either
+	ItmChk = Item_MakeChunk(FCC_shdr, SmplHdrSize, sf2_sample, 0x01);	// no free() needed either
 	List_AddItem(LstChk, ItmChk);
     return tot_samples;
 }
@@ -287,12 +283,12 @@ static void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, 
     rel_rate = (rel_rate == 0xFFFF) ? 0 : ticks * cps3_tick;
     rel_rate = LinAmpDecayTimeToLinDBDecayTime(rel_rate, 0x800);
     //btw it was log2() MULTIPLYED by 1200, not divided
-    atk_rate = (atk_rate == 0) ? -32768 : Log2(atk_rate) * 1200;
-    dec_rate = (dec_rate == 0) ? -32768 : log2(dec_rate) * 1200;
+    atk_rate = SecondsToTimecents(atk_rate);
+    dec_rate = SecondsToTimecents(dec_rate);
     sus_levl = ConvertPercentAmplitudeToAttenDB_SF2(sus_levl);
     sus_levl = (sus_levl >= 100) ? 1000 : 10 * sus_levl;
-    sus_rate = (sus_rate == 0) ? -32768 : log2(sus_rate) * 1200;
-    rel_rate = (rel_rate == 0) ? -32768 : Log2(rel_rate) * 1200;
+    sus_rate = SecondsToTimecents(sus_rate);
+    rel_rate = SecondsToTimecents(rel_rate);
     volume += 64;
     volume = 0 - (log10(127 / volume) * 200);
     *atk = RoundTo16(atk_rate);
@@ -312,7 +308,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
     }
     fseek(instrumentfile, 0, SEEK_END);
     int size = ftell(instrumentfile);
-    printf("the size of instrument rom is %x\n", size);
+    printf("\tthe size of instrument rom is %x\n", size);
     rewind(instrumentfile);
     UINT8 * data = malloc(size * sizeof(char));
     fread(data, sizeof(char), size, instrumentfile);
@@ -349,7 +345,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
 	UINT16 CurIns = 0;
 	*is_instr_null = malloc(InsAlloc);
 	memset(*is_instr_null, 0, InsAlloc);
-    for (UINT8 i = 0; i < instr_count; i ++){
+    for (UINT16 i = 0; i < instr_count; i ++){
         (*is_instr_null)[i] = 0;
     }
     UINT32 pointer_address = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
@@ -376,11 +372,6 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
             sprintf(InsData[CurIns].achInstName, "Instrument %02hX", CurIns);
             InsData[CurIns].wInstBagNdx = InsBagCnt;
                 for(pos = bank_offset + inst_offset; end_instr < 0xffff; pos += 12){
-                    if (CurIns == 0x31){
-                        for (int i = 0; i < 12; i++){
-                           printf(" \n %x at pos %d", data[pos + i], i);
-                        }
-                    }
                     CurNote = data[pos];
                     if (CurNote < LastNote) break;
                     if (pos == 2498){
@@ -411,10 +402,10 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                         AddInsGen_U16(&InsGenAlloc, &InsGenCnt, &InsGen, sampleModes, loop_mode);
                         AddInsGen_U16(&InsGenAlloc, &InsGenCnt, &InsGen, sampleID, sample_id);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, attackVolEnv, atk); //evndata & 0x7fff
-                        AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, holdVolEnv, srt);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, decayVolEnv, dec);
-                        //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
+                        AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, releaseVolEnv, rel);
+                        //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
                         INT8 detune = data[pos + 6];
                         if (detune != 0){
                             UINT8 check1 = 1;
@@ -433,7 +424,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                 }
             } else{
                 memset(&InsData[CurIns], 0x00, sizeof(sfInst));
-                sprintf(InsData[CurIns].achInstName, "empty instrument 0x%x", CurIns);
+                sprintf(InsData[CurIns].achInstName, "empty ins.0x%x", CurIns);
                 InsData[CurIns].wInstBagNdx = InsBagCnt;
                 (*is_instr_null)[CurIns] = 1;
             }
@@ -515,7 +506,7 @@ static void GeneratePresets(SF2_DATA* SF2Data, UINT16 InsCnt, UINT8* is_instr_nu
 	{
 		TempPHdr = &PrsDB[CurPrs];
 		memset(TempPHdr, 0x00, sizeof(sfPresetHeader));
-		sprintf(TempPHdr->achPresetName, "channel 10 preset %d", CurIns);
+		sprintf(TempPHdr->achPresetName, "ch10 pres.%d", CurIns);
 		if (is_instr_null[CurIns] == 1) sprintf(TempPHdr->achPresetName, "empty preset %x", CurIns);
 		TempPHdr->wPreset = CurIns & 127;			// MIDI Instrument ID
 		TempPHdr->wBank = 128;			// Bank MSB 0
@@ -556,6 +547,7 @@ static void GeneratePresets(SF2_DATA* SF2Data, UINT16 InsCnt, UINT8* is_instr_nu
 	return;
 }
 static void make_soundfont(const char* FileName, UINT8 bank_to_copy){
+    printf("generating soundfont...\n");
     SF2_DATA* SF2Data = 0;
     UINT16 SmplCnt;
 	UINT16 InsCnt;
@@ -580,7 +572,7 @@ static void make_soundfont(const char* FileName, UINT8 bank_to_copy){
 	return;
 }
 //midi
-UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8* master_channel, UINT8 sequence){ //to modify a variable in a function, dont forget to pass the pointer of it by inserting * before its name
+const UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8 *master_channel, UINT8 sequence){
     UINT32 start = pos;
     UINT32 seq_offset = 0;
     UINT16 chn_offset = 0;
@@ -603,9 +595,7 @@ UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8* master_channel, UINT8 sequenc
     UINT16 max_chn;
     UINT8 vib_cnt = 0;
     UINT8 check1 = 0;
-    UINT8 finite_loop = 0;
-    UINT32 start_Fpos[4] = {0};
-    UINT32 final_start_Fpos = 0;
+    INT16 unknow_val = 0;
     seq_offset = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
         for (pos = seq_offset + 1; pos < seq_offset + 33 ; pos += 2){
             chn_offset = ((data[pos] << 8) | data[pos + 1]);
@@ -615,15 +605,12 @@ UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8* master_channel, UINT8 sequenc
             //printf("channel offset: %x\n", chn_offset);
 
             //just in case
-            for (int i = 0; i < 4; i++){
-                cps3_repeat[i].times = 0;
-                temp_loop_start[i] = 0;
-                start_Fpos[i] = 0;
-            }
+            cps3_repeat[0].times = 0;
+            cps3_repeat[1].times = 0;
+            cps3_repeat[2].times = 0;
+            cps3_repeat[3].times = 0;
+
                 for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
-                    if (temp_chn_count == 2 && sequence == 11){
-                        UINT8 check10 = 1;
-                    }
                     if (data[pos] == 0xff) break;
                     if (data[pos] < 0x80){
                         delay = data[pos];
@@ -667,7 +654,7 @@ UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8* master_channel, UINT8 sequenc
                             type = data[pos] - 0xd0;
                             if (cps3_repeat[loop_start_type].times == 0 && type == loop_start_type){
                                 chn_loop_start[temp_chn_count] = tot_delay;
-                                temp_loop_start[loop_start_type] = tot_delay;
+                                temp_loop_start[loop_start_type] = chn_loop_start[temp_chn_count];
                             }
                             cps3_repeat[type].start = pos;
                             //printf("loop start is %x ", chn_loop_start[temp_chn_count]);
@@ -691,9 +678,13 @@ UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8* master_channel, UINT8 sequenc
                                         if (type != loop_start_type){
                                             chn_loop_start[temp_chn_count] = temp_loop_start[loop_start_type];
                                             loop_start_type = type;
+                                            chn_loop_end[temp_chn_count] = tot_delay;
+                                            chn_loop_size[temp_chn_count] = (chn_loop_end[temp_chn_count] - chn_loop_start[temp_chn_count]);
                                         }
-                                        chn_loop_end[temp_chn_count] = tot_delay;
-                                        chn_loop_size[temp_chn_count] = (chn_loop_end[temp_chn_count] - chn_loop_start[temp_chn_count]);
+                                        else if (type == loop_start_type){
+                                            chn_loop_end[temp_chn_count] = tot_delay;
+                                            chn_loop_size[temp_chn_count] = (chn_loop_end[temp_chn_count] - chn_loop_start[temp_chn_count]);
+                                        }
                                     }
                                 else pos = cps3_repeat[type].start;
                             }
@@ -731,20 +722,18 @@ UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8* master_channel, UINT8 sequenc
         else temp_chn_count ++;
     }
     song_lenght = 0;
-    UINT8 prev_master_ch;
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
-        if (temp_chn_count == 7 && sequence == 11){
+        if (temp_chn_count == 0 && sequence == 26){
             UINT8 check1 = 1;
         }
         if (song_lenght < chn_loop_size[temp_chn_count]){
             song_lenght = chn_loop_size[temp_chn_count];
             *master_channel = temp_chn_count;
-            prev_master_ch = *master_channel;
         }
     }
     UINT16 min_start = 0xffff;
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
-        if (sequence == 11){
+        if (temp_chn_count == 0 && sequence == 26){
             UINT8 check1 = 1;
         }
         if (chn_loop_size[temp_chn_count] == 0) chn_loop_size[temp_chn_count] = song_lenght;
@@ -783,14 +772,14 @@ if the current lfo state is equal to 1, then the lfo is rising, else its falling
 then check whenever the current lfo value is close to the limit, and, if it is:
 set the current value to the true lfo limit (shift the value from the vibrato depth table by 16 bits, to get the positive and negative limit)
 else, add the lfo increment value (or subtract if the lfo state is 0)*/
-static void process_lfo(INT32 *vib_depth, INT32 *lfo_rate, INT8 *lfo_state, INT32 *lfo_limit, INT32 *cur_lfo_val, INT32 *lfo_increment){
+const void process_lfo(INT32 *vib_depth, INT32 *lfo_rate, INT8 *lfo_state, INT32 *lfo_limit, INT32 *cur_lfo_val, INT32 *lfo_increment){
     if (*lfo_state == 1){//1 represents a rising lfo, while 0 represents a fallling lfo
         *lfo_limit = *vib_depth - *lfo_increment;//calculate the (close to) maximum limit
         if (*cur_lfo_val >= *lfo_limit){//if the current value is greater that the limit
             *cur_lfo_val = *vib_depth;//set the value of the limit to the lfo value
             *lfo_state = 0;
         }
-                else {
+        else {
             *cur_lfo_val += *lfo_increment;
         }
     }
@@ -805,30 +794,18 @@ static void process_lfo(INT32 *vib_depth, INT32 *lfo_rate, INT8 *lfo_state, INT3
         }
     }
 }
-static void reset_lfo(INT32 *vib_depth, INT32 *lfo_rate, INT8 *lfo_state, INT32 *lfo_limit, INT32 *cur_lfo_val, INT32 *lfo_increment){
+const void reset_lfo(INT32 *vib_depth, INT32 *lfo_rate, INT8 *lfo_state, INT32 *lfo_limit, INT32 *cur_lfo_val, INT32 *lfo_increment){
     *vib_depth = 0;
     *lfo_state = 1;
     *cur_lfo_val = 0;
     *lfo_increment = 0;
 }
-static void portamento_fix(double semitone, UINT8 new_rpn){
+const void portamento_fix(double semitone, UINT8 new_rpn){
     INT16 portamento = semitone * 8192 / new_rpn;
     return;
 }
-static void write_song(UINT8 * data, UINT32 length, int song_id){
-    char filename[64];
-    sprintf(filename, "song %d.mid", song_id);
-    FILE * midi = fopen(filename, "wb");
-    if (midi == NULL){
-        printf("error opening midi file");
-        return;
-    }
-    fwrite(data, 0x01, length, midi);
-    fclose(midi);
-    return;
-}
-static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
-    const UINT16 vol_table[128] = {
+const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequence){
+    static const UINT16 vol_table[128] = {
         0, 0xA, 0x18, 0x26, 0x34, 0x42, 0x51, 0x5F, 0x6E, 0x7D, 0x8C, 0x9B, 0xAA,
         0xBA, 0xC9, 0xD9, 0xE9, 0xF8, 0x109, 0x119, 0x129, 0x13A, 0x14A, 0x15B,
         0x16C, 0x17D, 0x18E, 0x1A0, 0x1B2, 0x1C3, 0x1D5, 0x1E8, 0x1FC, 0x20D, 0x21F,
@@ -855,7 +832,7 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
     UINT16 note_lenght = 0;
     UINT16 delay_length = 0;
     UINT8 velocity;
-    UINT8 note;
+    UINT8 note = 0;
     UINT8 type;
     UINT8 start_type = 0;
     UINT8 tempo_chars[4];
@@ -883,12 +860,13 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
     WriteMidiHeader(&midi_inf, 0x0001, 16, 0x30);
     mid_state.midChn = 0x00;
     UINT16 instr_number = 0;
-    UINT8 bank_number = 0xff;
+    UINT8 bank_number = 0;
     INT32 vibrato_value;
     UINT8 check = 0;
     INT8 pitch = 0;
     UINT32 bend_tick = 0;
     UINT8 bend_on = 0;
+    INT16 unknow_val = 0;
     UINT32 seq_offset = ((data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3]);
     for (pos = seq_offset + 1; pos < seq_offset + 33 ; pos += 2){
         UINT16 chn_offset = ((data[pos] << 8) | data[pos + 1]);
@@ -900,7 +878,7 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 21){
+            if (sequence == 10){
                 check = 1;
             }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
@@ -921,13 +899,9 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
             UINT8 note_on = 0;
             INT32 vibrato_final;
             INT32 prev_bend = 0;
-            INT32 command_dd_prev_val = 0;
             for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
-                if (mid_state.midChn == 0x07){
+                if (mid_state.midChn == 0x00){
                     UINT8 check2 = 1;
-                }
-                if (mid_state.curDly == 3){
-                    UINT8 check3 = 1;
                 }
                 UINT8 master_loop = 0;
                 //printf("pos %x\t", pos);
@@ -1020,7 +994,6 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
                                 }
                                 else if(play_mode == 1){
                                     reset_lfo(&vib_depth, &lfo_rate, &lfo_state, &lfo_limit, &cur_lfo_val, &lfo_increment);
-                                    //WriteEvent(&midi_inf, &mid_state, 0xe0, 0x00, 0x40);
                                 }
                                 pos += 2;
                                 break;
@@ -1075,10 +1048,10 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
                                             WriteMetaEvent(&midi_inf, &mid_state, 0x06, strlen("loopStart"), "loopStart");
                                             start_type = type;
                                         }
-                                        cps3_repeat[type].times = result_loop_times[mid_state.midChn]; //sometimes, channels have are smaller than others
-                                        // so i try to correct them by approximating the correct amount of times in the function check_loop, shown earlier.
-                                        master_loop = 1;
-                                        //printf("repeat is now %x ", result_loop_times[channel]);
+                                    cps3_repeat[type].times = result_loop_times[mid_state.midChn]; //sometimes, channels have are smaller than others
+                                    // so i try to correct them by approximating the correct amount of times in the function check_loop, shown earlier.
+                                    master_loop = 1;
+                                    //printf("repeat is now %x ", result_loop_times[channel]);
                                     }
                                     pos = cps3_repeat[type].start;
                                 }
@@ -1109,14 +1082,14 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
                                 break;
                             }
                             case 0xdc:{
-                                UINT8 val = data[pos + 1];
-                                command_dd_prev_val = val;
+                                INT8 val = data[pos + 1];
+                                unknow_val += (INT16)data;
                                 pos += 2;
                                 break;
                             }
                             case 0xdd:{
-                                UINT8 val = data[pos + 1];
-                                command_dd_prev_val += val;
+                                INT8 val = data[pos + 1];
+                                unknow_val = (INT16)data;
                                 pos += 2;
                                 break;
                             }
@@ -1181,14 +1154,16 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
                                 vibrato_final = (cur_lfo_val >> 16) << 1;
                                 bend_final += (vibrato_final);
                             }
-                            INT16 detune = (INT16)key_split[(instr_number) + (bank_number * 128)][note].detune;
-                            bend_final += detune << 1;
+                            if (note_on){
+                                INT16 detune = (INT16)key_split[(instr_number) + (bank_number * 128)][note].detune;
+                                bend_final += detune << 1;
+                            }
                             if (bend_final != prev_bend){
                                 prev_bend = bend_final;
                                 bend_final += 0x2000;
                                 WriteEvent(&midi_inf, &mid_state, 0xe0 | mid_state.midChn, bend_final & 0x7f, (bend_final >> 7) & 0x7f);
                             }
-                            //you dont have to reset pitchbend, because the game already does so
+                            //you dont have to reset,  because the game already does so
                             tot_tick ++;
                             mid_state.curDly ++;
                             note_lenght --;
@@ -1223,7 +1198,19 @@ static UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 sequ
     write_song(midi_data, midi_length, sequence);
     return 1;
 }
-static void make_music_data(){
+const void write_song(UINT8 * data, UINT32 length, int song_id){
+    char filename[64];
+    sprintf(filename, "song %d.mid", song_id);
+    FILE * midi = fopen(filename, "wb");
+    if (midi == NULL){
+        printf("error opening midi file");
+        return 1;
+    }
+    fwrite(data, 0x01, length, midi);
+    fclose(midi);
+    return;
+}
+const void make_music_data(){
     FILE * seqfile = fopen("sequence.bin", "rb");
     if (seqfile == NULL){
         printf("error opening sequence file");
@@ -1250,10 +1237,10 @@ static void make_music_data(){
         printf("\tconverting sequence %d (pos %x)...", song_id, song_offset);
         UINT8 master_channel = 0;
         //first, pre process song
-        if (song_id ==  11){
+        if (song_id ==  7){
             UINT8 check = 1;
         }
-        analyze_song(data, pos, &master_channel, song_id); // why do i forget to make the value i want to modify a pointer?
+        analyze_song(data, pos, &master_channel, song_id);
         //then, make the midi
         make_song(data, pos, master_channel, song_id);
         //and, finally, write the song to a new midi file
@@ -1261,6 +1248,7 @@ static void make_music_data(){
         pos = seq_table_pos;
         song_id ++; //go to the next song
     }
+    free(data);
     return;
 }
 //main
@@ -1272,5 +1260,3 @@ int main(){
     return 0;
 }
 //end
-
-
