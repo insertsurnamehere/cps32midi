@@ -285,8 +285,10 @@ static void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, 
     //btw it was log2() MULTIPLYED by 1200, not divided
     atk_rate = SecondsToTimecents(atk_rate);
     dec_rate = SecondsToTimecents(dec_rate);
-    sus_levl = ConvertPercentAmplitudeToAttenDB_SF2(sus_levl);
-    sus_levl = (sus_levl >= 100) ? 1000 : 10 * sus_levl;
+    if (sus_levl > 1){
+        sus_levl = ConvertPercentAmplitudeToAttenDB_SF2(sus_levl);
+        sus_levl = (sus_levl >= 100) ? 1000 : 10 * sus_levl;
+    }
     sus_rate = SecondsToTimecents(sus_rate);
     rel_rate = SecondsToTimecents(rel_rate);
     volume += 64;
@@ -365,9 +367,6 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
             UINT16 end_instr = 0x0000;
             LastNote = 0;
             if(inst_offset){
-                if (CurIns == 42){
-                    CHAR check = 1;
-                }
             memset(&InsData[CurIns], 0x00, sizeof(sfInst));
             sprintf(InsData[CurIns].achInstName, "Instrument %02hX", CurIns);
             InsData[CurIns].wInstBagNdx = InsBagCnt;
@@ -381,6 +380,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                     if (sample_id == 0xffff){
                         sample_id = 0;
                         (*is_instr_null)[CurIns] = 1;
+                        end_instr = (data[pos + 12] << 8) | data[pos + 13];
                     }
                     else{
                         UINT8 key = root_key_array[sample_id];
@@ -403,7 +403,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                         AddInsGen_U16(&InsGenAlloc, &InsGenCnt, &InsGen, sampleID, sample_id);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, attackVolEnv, atk); //evndata & 0x7fff
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, decayVolEnv, dec);
-                        AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
+                        if (sus > 1) AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, releaseVolEnv, rel);
                         //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
                         INT8 detune = data[pos + 6];
@@ -878,9 +878,6 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
             WriteMidiTrackStart(&midi_inf, &mid_state);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7E, 00);
             WriteEvent(&midi_inf, &mid_state, 0xB0| mid_state.midChn, 0x7D, 00);
-            if (sequence == 10){
-                check = 1;
-            }
             //in rpn 00, i should be able to adjust the pitch bend range, because right now is too low
             //so, lets set it.
             //the rpn is a set of additional controllers, such as pitch bend range, channel fine and coarse tuning, program and bank tuning...
@@ -899,9 +896,10 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
             UINT8 note_on = 0;
             INT32 vibrato_final;
             INT32 prev_bend = 0;
+            vib_on = 0;
             for (pos = seq_offset + chn_offset; data[pos] != 0xff; ){
-                if (mid_state.midChn == 0x00){
-                    UINT8 check2 = 1;
+                if (sequence == 21 && mid_state.midChn == 0x03){
+                    check = 1;
                 }
                 UINT8 master_loop = 0;
                 //printf("pos %x\t", pos);
@@ -988,7 +986,7 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                                 vib_depth = vibrato_depth_table[vib_depth];
                                 //double res_vib_depth = ConvertPercentAmpToStdMidiVal((double) (vibrato_depth_table[vib_depth] * (100 / 256)));
                                 vib_on = (vib_depth > 0)? 1: 0;
-                                if (vib_on == 1){
+                                if (vib_on){
                                     lfo_increment = vib_depth * lfo_rate;
                                     vib_depth <<= 16;
                                 }
