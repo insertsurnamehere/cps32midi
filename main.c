@@ -115,7 +115,10 @@ UINT32 merge_sample_roms(UINT8 ** buffer_ptr){
 
     char filename[64];
     FILE * temp_file = fopen("simm3.0", "rb");
-    if (temp_file == NULL) printf("simm file not found");
+    if (temp_file == NULL){
+        printf("\n\nSimm file not found\nMake sure you have these files\n\nTo do this: extract the zipped rom folder, then copy into this program's root directory (the same this program is in)\nall files that end in simm3.x\n\nSelect all these files, and rename them by removing any prefix (ex:game name) and the dash\n\n\n");
+        exit(EXIT_FAILURE);
+    }
     int file_pos = 0;
     int pos = 0;
     int file_count = 0;
@@ -127,6 +130,10 @@ UINT32 merge_sample_roms(UINT8 ** buffer_ptr){
         if (temp_file == NULL) break;
         tot_files ++;
         fclose(temp_file);
+    }
+    if (tot_files % 2 == 1){
+        printf("no matching simm file for simm3.%d.\n\nSimm files have their data split between 2 files, with the more recent rom format, and the program will try to interleave (stitch byte to byte) the files as couples, which can't be done if no matching file is found.", tot_files);
+        exit(EXIT_FAILURE);
     }
     FILE * file[tot_files];
     int size[tot_files];
@@ -241,9 +248,14 @@ INT8 env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, INT16 *
     //because i have been informed that the envelope table found in the cps3 was similar to the one in the cps2
     //actually, im going to "disassemble" the code for the envelopes, and sort-of compare them...
     //not happy with the result i have now, also the mixing is bad...
-    UINT16 test = *sus;
+    UINT16 test[5];
+    test[0] = *atk;
+    test[1] = *dec;
+    test[2] = *sus;
+    test[3] = *srt;
+    test[4] = *rel;
     INT8 is_sus_infinite = 0;
-    if (test >= 0x7f){
+    if (test[2] >= 0x7f){
             is_sus_infinite = 1;
     }
     UINT16 temp_pointer[6] = {0};
@@ -276,7 +288,7 @@ INT8 env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, INT16 *
     }
     dec_rate = LinAmpDecayTimeToLinDBDecayTime(dec_rate, 0x800);
     //SUSTAIN LEVEL (GAIN)
-    if (dec_rate <= 1){
+    if (temp_pointer[1] <= 1){
         sus_levl = 1;
         is_sus_infinite = 1;
     }else
@@ -378,7 +390,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                 for(pos = bank_offset + inst_offset; end_instr < 0xffff; pos += 12){
                     CurNote = data[pos];
                     if (CurNote < LastNote) break;
-                    if (CurIns == 46){
+                    if (CurIns == 20){
                         UINT8 check1 = 1;
                     }
                     UINT16 sample_id = (data[pos + 4] << 8) | data[pos + 5];
@@ -706,7 +718,7 @@ const UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8 *master_channel, UINT8 s
                         break;
                         }
                         default:{
-                            printf("unhandeled command at position %x, the command is %x", pos, data[pos]);
+                            printf("\n\nUnhandeled command at position %x, the command is %x\n\nContact insertnamehere for troubleshooting at vgmrips, or check out the tutorial(coming soon)", pos, data[pos]);
                             exit(EXIT_FAILURE);
                             break;
                         }
@@ -851,8 +863,10 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
     UINT8 type;
     UINT8 start_type = 0;
     UINT8 tempo_chars[4];
-    UINT8 play_mode = 0; //there are multiple playback modes, for example a mode that resets the lfo every new note
+    UINT8 play_mode = 0;
+    //there are multiple playback modes, for example a mode that resets the lfo every new note
     //that can be set by changing the playback enabler (at channel index (at 0x02078d0c + (channel * 0x74)) + 0x62) from 0x20 to any other number less that 0xc0
+
     //vibrato stuff
     INT32 vib_depth = 0;
     INT32 lfo_rate = 0;
@@ -868,12 +882,15 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
     //always initialized as 0x00 and 0x40
     INT8 byte1 = 0;
     INT8 parameter = 0x40;
+
     //initialization of the midi file
     midi_inf.alloc = 0x20000;
     midi_inf.data = (UINT8*)malloc(midi_inf.alloc);
     midi_inf.pos = 0x00;
     WriteMidiHeader(&midi_inf, 0x0001, 16, 0x30);
     mid_state.midChn = 0x00;
+
+    //other stuff
     UINT16 instr_number = 0;
     UINT8 bank_number = 0;
     INT32 vibrato_value;
@@ -949,11 +966,10 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                         switch (data[pos]){
                             case 0xc1:{ //TEMPO
                                 tempo = ((data[pos + 1] << 8) | data[pos + 2]);
-                                tempo = (60000000 / (tempo * 64 / 220)); //not my formula
+                                tempo = (60000000 / (tempo * 64 / 220)); //not my formula, guessed by ctr
                                 WriteBE32(tempo_chars, tempo);
                                 WriteMetaEvent(&midi_inf, &mid_state, 0x51, 0x03, &tempo_chars[1]);
                                 msec_tick = tempo / 0x30;
-                                //bpm = (60000000 / tempo);
                                 //the code for handling the current lfo value is called once per frame
                                 //the cps3 refresh rate is 59,583 fps/hz
                                 //one frame is 16783.310 microseconds
@@ -969,6 +985,7 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                             }
                             case 0xc2:{ //BANK SELECT
                                 //printf("0xc2 in pos %x", pos);
+                                //16 banks to choose from
                                 bank_number = data[pos + 1];
                                 WriteEvent(&midi_inf, &mid_state, 0xb0 | mid_state.midChn, 0, data[pos + 1] & 0x0f);
                                 pos += 2;
@@ -980,7 +997,7 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                                 //6144 / 12 = 512, 8192 / 12 = 682,7 (roughly)
                                 //8192 / 512 = 16, so to get 512 cents, you have 16 semitones
                                 //portamento works best with 12 semitones, but vibrato works with 16 (maybe)
-                                //this is so stupid
+                                //we will handle the effect later, for now lets save the value (also, avoiding clashes with vibrato)
                                 UINT8 note_bend = data[pos + 1];
                                 note_bend_final = note_bend;
                                 //WriteEvent(&midi_inf, &mid_state, 0xe0, (note_bend << 6) & 0x40, (note_bend >> 1) & 0x7f);
@@ -995,7 +1012,7 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                                 pos += 2;
                                 break;
                             }
-                            case 0xc5:{ //VIBRATO (?)
+                            case 0xc5:{ //VIBRATO
                                 //printf("0xc5 in pos %x", pos);
                                 vib_depth = data[pos + 1];
                                 vib_depth = vibrato_depth_table[vib_depth];
@@ -1034,7 +1051,7 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                                 pos += 2;
                                 break;
                             }
-                            case 0xc9:{ //CHANNEL VOLUME 2
+                            case 0xc9:{ //UNSPECIFIED
                                 pos += 2;
                                 break;
                             }
@@ -1046,7 +1063,7 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                                 pos += 1;
                                 break;
                             }
-                            case 0xd4:case 0xd5:case 0xd6:case 0xd7:{ //REPEAT FROM REPEAT OF THE SAME TYPE ( ͡q͜ʖ͡q)
+                            case 0xd4:case 0xd5:case 0xd6:case 0xd7:{ //REPEAT FROM REPEAT OF THE SAME TYPE ( ͡o͜ʖ͡q)
                                 //printf("repeat in pos %x\tin the midi file, loop point now is %x\t", pos, midi_inf.pos);
                                 type = data[pos] - 0xd4; //d4 has type 0, d5 has type 1, d6 has type 2, and d7 has type 3
                                 if (sequence == 26 && mid_state.midChn == 0 && data[pos] == 0xd5){
@@ -1094,13 +1111,13 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                                 pos += 3;
                                 break;
                             }
-                            case 0xdc:{
+                            case 0xdc:{ //UNSPECIFIED
                                 INT8 val = data[pos + 1];
                                 unknow_val += (INT16)data;
                                 pos += 2;
                                 break;
                             }
-                            case 0xdd:{
+                            case 0xdd:{ //UNSPECIFIED
                                 INT8 val = data[pos + 1];
                                 unknow_val = (INT16)data;
                                 pos += 2;
@@ -1140,7 +1157,7 @@ const UINT8 make_song(UINT8* data, UINT32 pos, UINT8 master_channel, UINT8 seque
                                 break;
                             }
                             default:{
-                                printf("unhandeled command at position %x, the command is %x", pos, data[pos]);
+                                printf("\n\nThere seems to be a weird problem: the program has encountered an unhandled command while converting the song, but has already checked for this, and no unhandled command was found...\n\nContact insertnamehere for troubleshooting at vgmrips");
                                 exit(EXIT_FAILURE);
                                 break;
                             }
@@ -1226,13 +1243,13 @@ const void write_song(UINT8 * data, UINT32 length, int song_id){
 const void make_music_data(){
     FILE * seqfile = fopen("sequence.bin", "rb");
     if (seqfile == NULL){
-        printf("error opening sequence file");
+        printf("Error opening sequence file");
         exit(EXIT_FAILURE);
     }
     fseek(seqfile, 0, SEEK_END);
     int size = ftell(seqfile);
-    printf("the size of sequence file is %x\n", size);
-    printf("converting midi...\n");
+    printf("The size of sequence file is %x\n", size);
+    printf("Converting midi...\n");
     rewind(seqfile);
     UINT8 * data = malloc(size * sizeof(char));
     fread(data, sizeof(char), size, seqfile);
@@ -1265,8 +1282,11 @@ const void make_music_data(){
     return;
 }
 //main
-int main(){
-    printf(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n|welcome to the cps3 ripper, the most tedious-to-use music ripper...|\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+int main( int argc, char *argv[] ){
+    printf(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n|welcome to the cps3 ripper, the most tedious-to-use music ripper...|\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\nType anything as an argument to get a tutorial o this program...\n");
+    if(argc >= 2){
+        printf("tutorial coming soon...");
+    }
     make_soundfont("song.sf2", 0);
     make_music_data();
     printf("conversion done (this program may make faulty midis)");
