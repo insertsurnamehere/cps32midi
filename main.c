@@ -235,14 +235,17 @@ UINT16 GenerateSampleTable(SF2_DATA* SF2Data, UINT8** RetLoopMsk, UINT8** root_k
 	List_AddItem(LstChk, ItmChk);
     return tot_samples;
 }
-static void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, INT16 *vol){
+INT8 env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, INT16 *vol){
     //from vgmtrans source code (QsoundInstr.h)
     //i slightly modified it, but i still copied from it
     //because i have been informed that the envelope table found in the cps3 was similar to the one in the cps2
-
     //actually, im going to "disassemble" the code for the envelopes, and sort-of compare them...
     //not happy with the result i have now, also the mixing is bad...
     UINT16 test = *sus;
+    INT8 is_sus_infinite = 0;
+    if (test >= 0x7f){
+            is_sus_infinite = 1;
+    }
     UINT16 temp_pointer[6] = {0};
     rate_convert(*atk, 2, &temp_pointer[0]);
     rate_convert(*dec, 1, &temp_pointer[1]);
@@ -262,33 +265,35 @@ static void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, 
     ticks = atk_rate ? atk_rate / 0xffff : 0;
     atk_rate = (atk_rate == 0xffff) ? 0 : ticks * cps3_tick;
     //DECAY ENVELOPE
-    if (sus_levl >= 0x7E && sus_rate > 0 && dec_rate > 1) {
+    if (*sus >= 0x7E && *srt > 0 && *dec > 1) { //also, was performing this check with the variables already converted with the table, but it was meant to be used with the unconverted ones
         ticks = (long) ceil((0xFFFF - sus_levl) / (double) dec_rate);
         ticks += (long) ceil(sus_levl / (double) sus_rate);
         dec_rate = ticks * cps3_tick;
-        sus_levl = .00000001;
+        sus_levl = 0.00000001; //original function requests 0 but floats/doubles cant be exacly 0, also log of 0 is undefined
     } else {
         ticks = dec_rate ? (0xFFFF / dec_rate) : 0;
         dec_rate = (dec_rate == 0xFFFF) ? 0 : ticks * cps3_tick;
     }
     dec_rate = LinAmpDecayTimeToLinDBDecayTime(dec_rate, 0x800);
-    if (dec_rate <= 1)
-        sus_levl = 1.0;
-    else
+    //SUSTAIN LEVEL (GAIN)
+    if (dec_rate <= 1){
+        sus_levl = 1;
+        is_sus_infinite = 1;
+    }else
         sus_levl = sus_levl / (double) 0xFFFF;
+    //SUSTAIN RATE (UNSUPPORTED BY SF2)
     ticks = sus_rate ? 0xFFFF / sus_rate : 0;
     sus_rate = (sus_rate == 0xFFFF) ? 0 : ticks * cps3_tick;
     sus_rate = LinAmpDecayTimeToLinDBDecayTime(sus_rate, 0x800);
+    //RELEASE
     ticks = rel_rate ? 0xFFFF / rel_rate : 0;
     rel_rate = (rel_rate == 0xFFFF) ? 0 : ticks * cps3_tick;
     rel_rate = LinAmpDecayTimeToLinDBDecayTime(rel_rate, 0x800);
     //btw it was log2() MULTIPLYED by 1200, not divided
     atk_rate = SecondsToTimecents(atk_rate);
     dec_rate = SecondsToTimecents(dec_rate);
-    if (sus_levl > 1){
-        sus_levl = ConvertPercentAmplitudeToAttenDB_SF2(sus_levl);
-        sus_levl = (sus_levl >= 100) ? 1000 : 10 * sus_levl;
-    }
+    sus_levl = ConvertPercentAmplitudeToAttenDB_SF2(sus_levl);
+    sus_levl = (sus_levl >= 100) ? 1000 : 10 * sus_levl;
     sus_rate = SecondsToTimecents(sus_rate);
     rel_rate = SecondsToTimecents(rel_rate);
     volume += 64;
@@ -300,7 +305,7 @@ static void env_fix(INT16 *atk, INT16 *dec, INT16 *sus, INT16 *srt, INT16 *rel, 
     *rel = RoundTo16(rel_rate);
     *vol = RoundTo16(volume);
     //
-    return;
+    return is_sus_infinite;
 }
 UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopMsk, UINT8* root_key_array, UINT8** is_instr_null){
     FILE * instrumentfile = fopen("instrument.bin", "rb");
@@ -373,7 +378,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                 for(pos = bank_offset + inst_offset; end_instr < 0xffff; pos += 12){
                     CurNote = data[pos];
                     if (CurNote < LastNote) break;
-                    if (pos == 2498){
+                    if (CurIns == 46){
                         UINT8 check1 = 1;
                     }
                     UINT16 sample_id = (data[pos + 4] << 8) | data[pos + 5];
@@ -395,7 +400,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                         INT16 sus = data[pos + 9];//sustain level
                         INT16 srt = data[pos + 10];//sustain rate
                         INT16 rel = data[pos + 11];//release
-                        env_fix(&atk, &dec, &sus, &srt, &rel, &VOL);
+                        INT8 is_sus_inf = env_fix(&atk, &dec, &sus, &srt, &rel, &VOL);
                         AddInsBag(&InsBagAlloc, &InsBagCnt, &InsBags, InsGenCnt, 0);
                         AddInsGen_8(&InsGenAlloc, &InsGenCnt, &InsGen, keyRange, LastNote + 1, CurNote);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, overridingRootKey, key);
@@ -403,7 +408,7 @@ UINT16 GenerateInstruments(SF2_DATA* SF2Data, UINT16 SmplCnt, const UINT8* LoopM
                         AddInsGen_U16(&InsGenAlloc, &InsGenCnt, &InsGen, sampleID, sample_id);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, attackVolEnv, atk); //evndata & 0x7fff
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, decayVolEnv, dec);
-                        if (sus > 1) AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
+                        if (!is_sus_inf) AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
                         AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, releaseVolEnv, rel);
                         //AddInsGen_S16(&InsGenAlloc, &InsGenCnt, &InsGen, sustainVolEnv, sus);
                         INT8 detune = data[pos + 6];
@@ -589,6 +594,7 @@ const UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8 *master_channel, UINT8 s
     UINT32 chn_loop_end[16] = {0};
     UINT32 chn_loop_size[16] = {0};
     UINT32 chn_tot_size[16] = {0};
+    UINT32 chn_start[16] = {0};
     UINT32 song_lenght = 0;
     UINT32 chn_size = 0;
     UINT8 start_loop_times = 0;
@@ -722,13 +728,15 @@ const UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8 *master_channel, UINT8 s
         else temp_chn_count ++;
     }
     song_lenght = 0;
+    UINT8 biggest_channel = 0;
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
-        if (temp_chn_count == 0 && sequence == 26){
+        if (sequence == 36){
             UINT8 check1 = 1;
         }
         if (song_lenght < chn_loop_size[temp_chn_count]){
             song_lenght = chn_loop_size[temp_chn_count];
             *master_channel = temp_chn_count;
+            biggest_channel = temp_chn_count;
         }
     }
     UINT16 min_start = 0xffff;
@@ -745,7 +753,7 @@ const UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8 *master_channel, UINT8 s
     double loop_times;
     //printf("\nsong lenght is %x\n", song_lenght);
     for (temp_chn_count = 0; temp_chn_count < max_chn; temp_chn_count ++){
-        if (temp_chn_count == 7 && sequence == 11){
+        if (temp_chn_count == 36 && sequence == 11){
             UINT8 check1 = 1;
         }
         if (chn_loop_size[temp_chn_count] < song_lenght){
@@ -753,6 +761,13 @@ const UINT8 analyze_song(UINT8* data, UINT32 pos, UINT8 *master_channel, UINT8 s
             loop_times = result_loop_times[temp_chn_count];
             // my fault, it rounds to an integer when dividing, if i do the operations separately, or without cast to double, and it can create problems (ex, result is close to 1)
             result_loop_times[temp_chn_count] -= 1;
+            UINT32 result_ch_len = (chn_loop_size[temp_chn_count] * loop_times) + chn_loop_start[temp_chn_count];
+            UINT32 result_sng_len = (chn_loop_size[*master_channel] * 3) + chn_loop_start[*master_channel];
+            INT32 differ = result_sng_len - result_ch_len;
+            if (differ > 0){
+                result_loop_times[temp_chn_count] += (((double)song_lenght / differ) + 0.5)* 3;
+                loop_times = result_loop_times[temp_chn_count];
+            }
         }
         else result_loop_times[temp_chn_count] = 2;
        //printf("channel %x's loop times should be %x\n", temp_chn_count, result_loop_times[temp_chn_count]);
